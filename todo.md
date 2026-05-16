@@ -1,3 +1,3 @@
-- connect this repo to my github: https://github.com/maxkskhor/pokemon-harness.git
+- ~~connect this repo to my github: https://github.com/maxkskhor/pokemon-harness.git~~
 - On the harness logs, we should see directly the actions taken. like moves, and clicks. and also the thinking process. and it should be like chats, where it streams down instead.
 - The gameboy UI is way too small. There is a whole screen on the left panel that is useable.
