@@ -11,15 +11,15 @@ from typing import Any
 from harness.client import PokemonEnvClient
 
 
-class Harness:
+class PokemonAgent:
     """
-    Base class for a Pokemon agent harness.
+    Base class for a Pokemon agent.
 
     Subclass this, set `name`, and override `run()`.
     Call `.serve()` to register with the backend and wait for Play/Stop from the UI.
     """
 
-    name: str = "My Harness"
+    name: str = "My Pokemon Agent"
 
     def __init__(
         self,
@@ -28,7 +28,7 @@ class Harness:
         load_state: str | None = "bedroom",
     ) -> None:
         self._base_url = base_url
-        self._run_id_prefix = run_id or "harness"
+        self._run_id_prefix = run_id or "agent"
         self._run_id = self._new_run_id()
         self._load_state = load_state
         self._client = PokemonEnvClient(base_url)
@@ -90,7 +90,7 @@ class Harness:
         *,
         turn_id: str | None = None,
     ) -> None:
-        """Emit a harness event visible in the UI trace panel."""
+        """Emit an event visible in the UI trace panel."""
         self._client.emit(event_type, payload, turn_id=turn_id)
 
     def should_stop(self) -> bool:
@@ -120,7 +120,7 @@ class Harness:
         resp = self._client._post("/api/harness/register", {"name": self.name})
         self._harness_id = resp["id"]
         print(f"Registered '{self.name}' (id={self._harness_id})")
-        print("Open the UI, select this harness from the dropdown, and click Play.")
+        print("Open the UI, select this agent from the dropdown, and click Play.")
 
         try:
             self._control_loop()
@@ -205,7 +205,7 @@ class Harness:
         try:
             self.emit(event_type, payload, turn_id=turn_id)
         except Exception as exc:
-            print(f"Could not emit harness event '{event_type}': {exc}")
+            print(f"Could not emit event '{event_type}': {exc}")
 
     def _safe_state(self) -> dict[str, Any] | None:
         try:
@@ -233,7 +233,7 @@ class Harness:
             pass
 
     def _set_error(self, message: str) -> None:
-        print(f"Harness error: {message}")
+        print(f"Agent error: {message}")
         try:
             self._client._post(f"/api/harness/{self._harness_id}/error", {"message": message})
         except Exception:

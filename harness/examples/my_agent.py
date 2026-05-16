@@ -20,7 +20,7 @@ import re
 import openai
 from dotenv import load_dotenv
 
-from harness.harness import Harness
+from harness import PokemonAgent
 
 load_dotenv()
 
@@ -60,7 +60,7 @@ def _strip_think_tags(text: str) -> str:
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
-class MyAgent(Harness):
+class MyAgent(PokemonAgent):
     name = "My Agent"
 
     def __init__(self, **kwargs: object) -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from harness.harness import Harness
+from harness import PokemonAgent
 
 
 class FakeClient:
@@ -54,7 +54,7 @@ class FakeClient:
 
 
 def test_harness_press_emits_action_event() -> None:
-    harness = Harness()
+    harness = PokemonAgent()
     client = FakeClient()
     harness._client = client  # type: ignore[assignment]
 
@@ -78,7 +78,7 @@ def test_harness_press_emits_action_event() -> None:
 
 
 def test_harness_public_helpers_delegate_to_client() -> None:
-    harness = Harness()
+    harness = PokemonAgent()
     client = FakeClient()
     harness._client = client  # type: ignore[assignment]
 
@@ -94,7 +94,7 @@ def test_harness_public_helpers_delegate_to_client() -> None:
 
 
 def test_run_wrapped_emits_full_traceback_on_error(capsys: Any) -> None:
-    class BrokenHarness(Harness):
+    class BrokenPokemonAgent(PokemonAgent):
         def __init__(self) -> None:
             super().__init__()
             self.errors: list[str] = []
@@ -109,7 +109,7 @@ def test_run_wrapped_emits_full_traceback_on_error(capsys: Any) -> None:
         def _set_status(self, status: str) -> None:
             self.statuses.append(status)
 
-    harness = BrokenHarness()
+    harness = BrokenPokemonAgent()
     client = FakeClient()
     harness._client = client  # type: ignore[assignment]
 

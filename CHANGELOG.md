@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-05-17 (docs gardening)
+
+### Added
+- `LICENSE` — MIT license.
+- `README.md` — License section linking to LICENSE file.
+- `README.md` — Harness API table now includes `wait()`, `sequence()`, `save_state()`, `load_state()`, and the `turn_id` parameter on `emit()`.
+- `README.md` — documented `harness/replay.py` under a new "Other utilities" subsection.
+
+### Removed
+- `harness/examples/starter_route.py` — unused standalone script that bypassed the `Harness` base class; moved nothing, just deleted.
+
 ## 2026-05-16 (session 3)
 
 ### Added

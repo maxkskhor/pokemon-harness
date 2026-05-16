@@ -30,6 +30,10 @@ The repo is intentionally split into three parts:
 
 Generated ROMs, save states, traces, and cloned upstream source are local-only artifacts and are ignored by git.
 
+## License
+
+This project is released under the [MIT License](LICENSE).
+
 ## Legal Boundary
 
 This project does not download or distribute commercial ROM files. The setup script can build local ROM-compatible binaries from `pret/pokered` source for personal development, but you are responsible for making sure your use complies with applicable law.
@@ -154,8 +158,20 @@ Inside `run()`, these methods are available:
 | `screenshot(path)` | Save frame to a file |
 | `state()` | Game state dict (frame, map_id, x, y, party_count, …) |
 | `press(button, frames=8)` | Press A / B / UP / DOWN / LEFT / RIGHT / START / SELECT |
-| `emit(type, payload)` | Send an event to the UI trace panel |
+| `wait(frames)` | Advance the emulator by N frames without pressing a button |
+| `sequence(steps)` | Run a list of press/wait dicts as a single atomic sequence |
+| `save_state(name)` | Save the current emulator state under a run-local name |
+| `load_state(name)` | Load a run-local or shared emulator state by name |
+| `emit(type, payload, *, turn_id=None)` | Send an event to the UI trace panel |
 | `should_stop()` | True when Stop was clicked — check this in your loop |
+
+### Other utilities
+
+- **`harness/replay.py`** — replays button actions from a recorded `env.jsonl` trace back into a live environment. Useful for reproducing a prior run.
+
+  ```bash
+  uv run python -m harness.replay runs/<run-id>/env.jsonl
+  ```
 
 ## Full Verification
 
