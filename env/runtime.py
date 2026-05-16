@@ -231,7 +231,8 @@ class RuntimeManager:
             before = session.emulator.frame
             for step in request.steps:
                 if step.type == "press":
-                    assert step.button is not None
+                    if step.button is None:
+                        raise HTTPException(status_code=422, detail="press steps require a button")
                     session.emulator.press(step.button, step.frames)
                     executed.append({"type": "press", "button": step.button, "frames": step.frames})
                 else:
@@ -287,6 +288,7 @@ class RuntimeManager:
     async def _playback_loop(self, session: Session) -> None:
         tick_counts = {"paused": 0, "1x": 1, "5x": 5, "max": 30}
         delays = {"paused": 0.05, "1x": 1 / 60, "5x": 1 / 60, "max": 0.001}
+        last_emit = 0.0
         while session.running:
             mode = session.speed_mode
             frames = tick_counts[mode]
@@ -294,8 +296,10 @@ class RuntimeManager:
                 async with session.lock:
                     session.emulator.tick(frames)
                     frame = session.emulator.frame
-                if frame % 30 == 0:
-                    await session.emit_env("playback_frame", {"mode": mode}, trace=False)
+                now = asyncio.get_event_loop().time()
+                if now - last_emit >= 0.1:
+                    await session.emit_env("playback_frame", {"mode": mode, "frame": frame}, trace=False)
+                    last_emit = now
             await asyncio.sleep(delays[mode])
 
     def _state_path(self, run_id: str, name: str) -> Path:

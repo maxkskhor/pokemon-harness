@@ -16,6 +16,9 @@ states/*
 runs/*
 !runs/.gitkeep
 
+# Playwright MCP browser session artifacts.
+.playwright-mcp/
+
 # Frontend artifacts.
 ui/node_modules/
 ui/dist/

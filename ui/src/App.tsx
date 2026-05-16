@@ -39,6 +39,7 @@ export function App() {
   const [saveName, setSaveName] = useState("baseline");
   const [imageVersion, setImageVersion] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [wsConnected, setWsConnected] = useState(false);
   const eventRunIdRef = useRef<string | null>(null);
 
   const latestEvents = useMemo(() => {
@@ -47,24 +48,56 @@ export function App() {
     );
   }, [envEvents, harnessEvents]);
 
+  // Restore any active run on page load.
   useEffect(() => {
-    const ws = new WebSocket(wsUrl());
-    ws.onmessage = (message) => {
-      const event = JSON.parse(message.data) as TraceEvent;
-      if (eventRunIdRef.current !== event.run_id) {
-        eventRunIdRef.current = event.run_id;
-        setEnvEvents([]);
-        setHarnessEvents([]);
-      }
-      if (event.source === "env") {
-        setEnvEvents((events) => [...events.slice(-199), event]);
-        setImageVersion((version) => version + 1);
-      } else {
-        setHarnessEvents((events) => [...events.slice(-199), event]);
-      }
-      void refreshState(false);
+    getState()
+      .then((next) => {
+        setState(next);
+        setImageVersion((v) => v + 1);
+        eventRunIdRef.current = next.run_id;
+        void refreshTraces(next.run_id);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    let ws: WebSocket;
+
+    function connect() {
+      ws = new WebSocket(wsUrl());
+      ws.onopen = () => { if (alive) setWsConnected(true); };
+      ws.onclose = () => {
+        if (alive) {
+          setWsConnected(false);
+          setTimeout(connect, 2000);
+        }
+      };
+      ws.onerror = () => ws.close();
+      ws.onmessage = (message) => {
+        const event = JSON.parse(message.data) as TraceEvent;
+        if (eventRunIdRef.current !== event.run_id) {
+          eventRunIdRef.current = event.run_id;
+          setEnvEvents([]);
+          setHarnessEvents([]);
+        }
+        if (event.source === "env") {
+          if (event.type !== "playback_frame") {
+            setEnvEvents((events) => [...events.slice(-199), event]);
+          }
+          setImageVersion((version) => version + 1);
+        } else {
+          setHarnessEvents((events) => [...events.slice(-199), event]);
+        }
+        void refreshState(false);
+      };
+    }
+
+    connect();
+    return () => {
+      alive = false;
+      ws?.close();
     };
-    return () => ws.close();
   }, []);
 
   async function runAction<T>(action: () => Promise<T>, refresh = true): Promise<T | null> {
@@ -159,7 +192,7 @@ export function App() {
         <header className="topbar">
           <div>
             <h1>Pokemon Harness</h1>
-            <span>{API_BASE}</span>
+            <span>{API_BASE} {wsConnected ? "● connected" : "○ disconnected"}</span>
           </div>
           <div className="run-controls">
             <input value={runId} onChange={(event) => setRunId(event.target.value)} aria-label="Run id" />
