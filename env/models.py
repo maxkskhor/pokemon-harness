@@ -69,3 +69,15 @@ class HarnessEventRequest(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     turn_id: str | None = Field(default=None, max_length=80)
     frame: int | None = Field(default=None, ge=0)
+
+
+class HarnessRegisterRequest(BaseModel):
+    name: str = Field(default="Harness", min_length=1, max_length=80)
+
+
+class HarnessStatusRequest(BaseModel):
+    status: str = Field(min_length=1, max_length=20)
+
+
+class HarnessErrorRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=500)

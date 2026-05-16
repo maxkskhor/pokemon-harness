@@ -97,6 +97,25 @@ export function loadState(name: string): Promise<PokemonState> {
   });
 }
 
+export interface HarnessAgent {
+  id: string;
+  name: string;
+  status: "idle" | "running" | "stopping" | "error";
+  error: string | null;
+}
+
+export function listHarnesses(): Promise<HarnessAgent[]> {
+  return request<HarnessAgent[]>("/api/harness/list");
+}
+
+export function playHarness(id: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/api/harness/${id}/play`, { method: "POST" });
+}
+
+export function stopHarness(id: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/api/harness/${id}/stop`, { method: "POST" });
+}
+
 export function traceUrl(runId: string, source: TraceSource): string {
   return `${API_BASE}/api/runs/${runId}/${source}-trace`;
 }

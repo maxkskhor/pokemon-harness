@@ -1,4 +1,5 @@
 .DS_Store
+.env
 .venv/
 __pycache__/
 .pytest_cache/
@@ -18,6 +19,9 @@ runs/*
 
 # Playwright MCP browser session artifacts.
 .playwright-mcp/
+
+# Debug screenshots captured during development.
+*.png
 
 # Frontend artifacts.
 ui/node_modules/

@@ -1,5 +1,25 @@
 # Pokemon LLM Harness
 
+## Quick Start
+
+**First time only:**
+```bash
+brew install rgbds
+UV_CACHE_DIR=/private/tmp/uv-cache uv sync --dev
+cd ui && npm install && cd ..
+scripts/setup_pokered.sh          # build ROM (~2 min)
+uv run python scripts/setup_bedroom.py  # create bedroom save state (backend must be running first)
+```
+
+**Every session:**
+```bash
+scripts/dev.sh                                   # terminal 1: backend + UI
+uv run python harness/examples/my_agent.py       # terminal 2: your agent
+# Open http://localhost:5173 → select agent from dropdown → click Play
+```
+
+---
+
 A local Pokemon Red/Blue environment for learning how to build an LLM agent harness.
 
 The repo is intentionally split into three parts:
@@ -75,15 +95,67 @@ Important endpoints:
 - `GET /api/runs/{run_id}/harness-trace`
 - `WS /ws/events`
 
-## Deterministic Verification Harness
+## Building an Agent Harness
 
-Once the backend is running and `roms/pokered.gbc` exists:
+### One-time setup: bedroom save state
+
+After building the ROM, create a save state with Red already standing in the bedroom (post-intro):
 
 ```bash
-UV_CACHE_DIR=/private/tmp/uv-cache uv run python -m harness.examples.starter_route --run-id verify-starter
+uv run python scripts/setup_bedroom.py
 ```
 
-The example starts a run, emits harness trace events, drives deterministic button sequences, saves state, and records environment actions separately from harness events. The final event includes `starter_obtained`; the current script is primarily a smoke test for the full stack and trace plumbing, not a solved Pokemon route.
+This boots the game at max speed, skips the intro dialogue, names the character RED by default, and saves state as `bedroom`. Your harness loads this automatically on every Play.
+
+### Writing your agent
+
+Create a subclass of `Harness`, set a name, and implement `run()`:
+
+```python
+# my_agent.py
+from harness.harness import Harness
+
+class MyAgent(Harness):
+    name = "My Agent"
+
+    def run(self) -> None:
+        while not self.should_stop():
+            png = self.screenshot_bytes()   # current frame as PNG bytes
+            game = self.state()             # frame, map position, party, etc.
+
+            # call your LLM here, then act:
+            self.press("A")                 # press a button
+            self.emit("step", {"note": "reasoning here"})  # visible in UI
+
+if __name__ == "__main__":
+    MyAgent().serve()
+```
+
+A minimal working template is at `harness/examples/my_agent.py`.
+
+### Running your agent with the UI
+
+1. Start the backend and UI: `scripts/dev.sh`
+2. Launch your agent script: `uv run python my_agent.py`
+3. Open the UI in your browser
+4. Select your agent from the **Harness dropdown** in the right panel
+5. Click **Play** — the agent starts, loads the bedroom state, and begins its loop
+6. Click **Stop** to interrupt the agent
+
+The right panel shows all events your agent emits via `self.emit(...)`. Click any event to expand its payload.
+
+### Harness API reference
+
+Inside `run()`, these methods are available:
+
+| Method | Description |
+|---|---|
+| `screenshot_bytes()` | Current frame as raw PNG bytes |
+| `screenshot(path)` | Save frame to a file |
+| `state()` | Game state dict (frame, map_id, x, y, party_count, …) |
+| `press(button, frames=8)` | Press A / B / UP / DOWN / LEFT / RIGHT / START / SELECT |
+| `emit(type, payload)` | Send an event to the UI trace panel |
+| `should_stop()` | True when Stop was clicked — check this in your loop |
 
 ## Full Verification
 

@@ -269,7 +269,11 @@ class RuntimeManager:
         session = self._require_session()
         path = self._state_path(session.run_id, request.name)
         if not path.exists():
-            raise HTTPException(status_code=404, detail=f"Save state not found: {request.name}")
+            shared = self.states_dir / "shared" / f"{request.name}.state"
+            if shared.exists():
+                path = shared
+            else:
+                raise HTTPException(status_code=404, detail=f"Save state not found: {request.name}")
         async with session.lock:
             session.emulator.load_state(path)
             state = session.state_payload()
