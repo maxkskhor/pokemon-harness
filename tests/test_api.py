@@ -4,6 +4,10 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from env.app import HarnessRegistry, create_app
+from env.emulator import FakeEmulator
+from env.trace import TraceStore
+
 
 def start_fake_run(client: TestClient, fake_rom: Path, fake_sym: Path, run_id: str = "test-run") -> dict:
     response = client.post(
@@ -105,3 +109,57 @@ def test_harness_registry_tracks_status_timestamps(client: TestClient) -> None:
 
     invalid = client.post(f"/api/harness/{harness_id}/status", json={"status": "wedged"})
     assert invalid.status_code == 422
+
+
+def test_harness_registry_queues_commands_fifo() -> None:
+    registry = HarnessRegistry()
+    harness_id = registry.register("Queue Agent")
+
+    registry.enqueue(harness_id, "play")
+    registry.enqueue(harness_id, "stop")
+
+    assert registry.poll(harness_id) == "play"
+    assert registry.poll(harness_id) == "stop"
+    assert registry.poll(harness_id) is None
+
+
+def test_harness_poll_preserves_rapid_play_stop(client: TestClient) -> None:
+    registered = client.post("/api/harness/register", json={"name": "Smoke Agent"}).json()
+    harness_id = registered["id"]
+
+    assert client.post(f"/api/harness/{harness_id}/play").status_code == 200
+    assert client.post(f"/api/harness/{harness_id}/stop").status_code == 200
+
+    assert client.get(f"/api/harness/{harness_id}/poll").json() == {"command": "play"}
+    assert client.get(f"/api/harness/{harness_id}/poll").json() == {"command": "stop"}
+    assert client.get(f"/api/harness/{harness_id}/poll").json() == {"command": None}
+
+
+def test_state_screen_hash_is_cached_until_frame_changes(tmp_path: Path, fake_rom: Path, fake_sym: Path) -> None:
+    class CountingFakeEmulator(FakeEmulator):
+        def __init__(self, rom_path: Path | None = None, sym_path: Path | None = None):
+            super().__init__(rom_path, sym_path)
+            self.screenshot_calls = 0
+
+        def screenshot_png(self) -> bytes:
+            self.screenshot_calls += 1
+            return super().screenshot_png()
+
+    app = create_app(
+        emulator_factory=CountingFakeEmulator,
+        trace_store=TraceStore(tmp_path / "runs"),
+        states_dir=tmp_path / "states",
+    )
+    with TestClient(app) as local_client:
+        start_fake_run(local_client, fake_rom, fake_sym)
+        session = app.state.manager.session
+        assert session is not None
+        emulator = session.emulator
+
+        local_client.get("/api/state")
+        local_client.get("/api/state")
+        assert emulator.screenshot_calls == 1
+
+        local_client.post("/api/step", json={"frames": 1})
+        local_client.get("/api/state")
+        assert emulator.screenshot_calls == 2

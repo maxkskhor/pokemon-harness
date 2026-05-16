@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import threading
 import time
+import traceback
 import uuid
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +28,8 @@ class Harness:
         load_state: str | None = "bedroom",
     ) -> None:
         self._base_url = base_url
-        self._run_id = run_id or f"harness-{uuid.uuid4().hex[:6]}"
+        self._run_id_prefix = run_id or "harness"
+        self._run_id = self._new_run_id()
         self._load_state = load_state
         self._client = PokemonEnvClient(base_url)
         self._stop_event = threading.Event()
@@ -48,6 +51,14 @@ class Harness:
         """Return the current game state (frame, position, party, etc.)."""
         return self._client.get_state()
 
+    def wait(self, frames: int) -> dict[str, Any]:
+        """Advance the emulator by game frames without pressing a button."""
+        return self._client.wait(frames)
+
+    def sequence(self, steps: list[dict[str, Any]]) -> dict[str, Any]:
+        """Run a press/wait action sequence."""
+        return self._client.press_sequence(steps)
+
     def press(self, button: str, frames: int = 8) -> None:
         """Press a GameBoy button."""
         before = self._safe_state()
@@ -63,6 +74,14 @@ class Harness:
                 "after": self._position_payload(after),
             },
         )
+
+    def save_state(self, name: str) -> dict[str, Any]:
+        """Save the current emulator state under a run-local name."""
+        return self._client.save_state(name)
+
+    def load_state(self, name: str) -> dict[str, Any]:
+        """Load a run-local or shared emulator state by name."""
+        return self._client.load_state(name)
 
     def emit(
         self,
@@ -131,6 +150,7 @@ class Harness:
             if cmd == "play" and (run_thread is None or not run_thread.is_alive()):
                 self._stop_event.clear()
                 self._set_status("starting")
+                self._run_id = self._new_run_id()
                 try:
                     self._client.start_run(self._run_id)
                 except Exception as exc:
@@ -168,8 +188,10 @@ class Harness:
             self.run()
             self._emit_safe("lifecycle", {"status": "agent_loop_finished"})
         except Exception as exc:
+            full_tb = traceback.format_exc()
             self._set_error(str(exc))
-            print(f"run() raised: {exc}")
+            print(full_tb, end="", file=sys.stderr)
+            self._emit_safe("error", {"message": str(exc), "traceback": full_tb})
         finally:
             self._set_status("idle")
 
@@ -216,3 +238,6 @@ class Harness:
             self._client._post(f"/api/harness/{self._harness_id}/error", {"message": message})
         except Exception:
             pass
+
+    def _new_run_id(self) -> str:
+        return f"{self._run_id_prefix}-{uuid.uuid4().hex[:8]}"

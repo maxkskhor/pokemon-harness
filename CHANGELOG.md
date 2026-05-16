@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-05-16 (session 3)
+
+### Added
+- `harness/harness.py` — public `wait()`, `sequence()`, `save_state()`, and `load_state()` helpers so harness authors do not need to reach into `self._client`.
+- `env/app.py` — `HarnessRegistry` class with FIFO command queues, allowing rapid Play then Stop commands to be polled in order.
+- `ui/src/App.tsx` and `ui/src/styles.css` — trace event filters, turn/session grouping, trace event count, reload-from-disk button, inter-event delta times, and expandable trace rows.
+- `tests/test_harness_base.py` and `tests/test_api.py` — regression coverage for the new harness helpers, full traceback emission, FIFO command polling, and cached screen hashes.
+
+### Changed
+- `harness/harness.py` — each Play command now creates a fresh harness run id, so UI trace state resets between replays.
+- `ui/src/App.tsx` and `ui/src/styles.css` — Emulator Start/Stop controls are visually/textually separated from Agent Play/Stop controls; the WebSocket indicator now has an explicit label.
+- `ui/src/App.tsx` and `ui/src/styles.css` — trace item expansion is limited to the header row and reasoning is collapsed to two lines by default with its own toggle.
+- `TODO.md` — removed completed TODO entries; the completed work is now recorded in this changelog.
+
+### Fixed
+- `harness/harness.py` — `_run_wrapped()` now captures the full traceback, prints it to stderr, and emits it as a harness `error` trace event before returning to idle.
+- `env/runtime.py` — `screen.sha256` is cached by frame and invalidated after emulator mutations, avoiding redundant screenshot rendering on repeated `GET /api/state` calls.
+- `ui/src/App.tsx` — state-grid metric values now expose full values via `title` tooltips when truncated.
+- `ui/src/api.ts` and `ui/src/App.tsx` — startup now checks `/api/health` before fetching `/api/state`, avoiding expected 404 console noise when no run exists.
+- `ui/pokemon-harness-smoke.spec.js` — updated the smoke test selector to match the clearer `Start run` control label.
+
+## 2026-05-16 (session 2)
+
+### Added
+- `harness/examples/my_agent.py` — rolling conversation history (last 5 turns) passed to the LLM each turn so the model retains context across steps.
+- `harness/examples/my_agent.py` — reasoning token extraction: tries `message.reasoning` attribute, `model_extra["reasoning"]`, then `<think>...</think>` tags in content. Emits extracted reasoning under `payload.reasoning` key.
+- `harness/examples/my_agent.py` — `_extract_reasoning()` and `_strip_think_tags()` helper functions; structured system prompt + per-turn user messages with just the latest screenshot.
+- `tests/test_my_agent.py` — 14 unit tests covering reasoning extraction (3 methods + edge cases), think-tag stripping, history growth, history cap at `MAX_HISTORY_TURNS`, multi-turn message ordering, reasoning in emit payload, and user message format.
+
+### Changed
+- `ui/src/App.tsx` — `eventLabel()`: removed `f####` frame number prefix; labels now show `turn-001 decision` instead of `f1234 turn-001 decision`.
+- `ui/src/App.tsx` — `summarizeEvent()` for `decision`: removed x/y location string; now just "Chose UP".
+- `ui/src/App.tsx` — `summarizeEvent()` for `action`: reformatted to tool-call style `press_button(UP, frames=8) — map 38 (3,6) → map 38 (3,5)`.
+- `ui/src/App.tsx` — `formatPosition()`: removed frame number from position display; shows `map N (x,y)` instead of `fN map N x/y X/Y`.
+- `ui/src/App.tsx` — `TraceItem`: reasoning now keyed on `reasoning`/`thought`/`thinking`/`raw_thought` (removed `raw_response` fallback to avoid showing the button name as a thought).
+- `harness/examples/my_agent.py` — `emit("decision")` payload no longer includes `map_id`, `x`, `y` (those are state data, not agent output); includes `reasoning` and `raw_response` (think-tags stripped).
+
 ## 2026-05-16
 
 ### Added

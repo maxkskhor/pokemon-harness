@@ -1,10 +1,12 @@
-import { Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bot, Gamepad2, MessageSquareText, Pause, Play, RotateCcw, Save, Square } from "lucide-react";
+import { Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bot, ChevronDown, ChevronRight, Gamepad2, MessageSquareText, Pause, Play, RefreshCw, RotateCcw, Save, Square } from "lucide-react";
+import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
   API_BASE,
   HarnessAgent,
   PokemonState,
   TraceEvent,
+  getHealth,
   getState,
   listHarnesses,
   loadState,
@@ -22,11 +24,12 @@ import {
 } from "./api";
 
 const speeds = ["paused", "1x", "5x", "max"];
+const filterTypes = ["action", "decision", "lifecycle", "warning"] as const;
+type FilterType = (typeof filterTypes)[number];
 
 function eventLabel(event: TraceEvent): string {
-  const frame = event.frame === null ? "" : `f${event.frame}`;
-  const turn = event.turn_id ? ` ${event.turn_id}` : "";
-  return `${frame}${turn} ${event.type}`.trim();
+  const turn = event.turn_id ? `${event.turn_id} ` : "";
+  return `${turn}${event.type}`.trim();
 }
 
 function formatPayload(payload: Record<string, unknown>): string {
@@ -43,28 +46,24 @@ function payloadText(payload: Record<string, unknown>, keys: string[]): string |
 
 function formatPosition(value: unknown): string | null {
   if (!value || typeof value !== "object") return null;
-  const position = value as Record<string, unknown>;
-  const frame = position.frame ?? "-";
-  const map = position.map_id ?? "-";
-  const x = position.x ?? "-";
-  const y = position.y ?? "-";
-  return `f${frame} map ${map} x/y ${x}/${y}`;
+  const pos = value as Record<string, unknown>;
+  if (pos.map_id == null && pos.x == null && pos.y == null) return null;
+  return `map ${pos.map_id ?? "-"} (${pos.x ?? "-"},${pos.y ?? "-"})`;
 }
 
 function summarizeEvent(event: TraceEvent): string {
   const payload = event.payload;
   if (event.type === "action") {
     const button = payload.button ?? payload.action ?? payload.input ?? "-";
-    const frames = payload.frames ? ` for ${payload.frames}f` : "";
+    const frames = payload.frames != null ? `, frames=${payload.frames}` : "";
     const before = formatPosition(payload.before);
     const after = formatPosition(payload.after);
-    const movement = before && after ? ` (${before} -> ${after})` : "";
-    return `Pressed ${button}${frames}${movement}`;
+    const movement = before && after ? ` — ${before} → ${after}` : "";
+    return `press_button(${button}${frames})${movement}`;
   }
   if (event.type === "decision") {
     const action = payload.action ?? payload.button ?? "-";
-    const location = payload.map_id !== undefined ? ` at map ${payload.map_id} x/y ${payload.x ?? "-"}/${payload.y ?? "-"}` : "";
-    return `Chose ${action}${location}`;
+    return `Chose ${action}`;
   }
   if (event.type === "lifecycle") {
     return String(payload.status ?? event.type).replaceAll("_", " ");
@@ -83,6 +82,17 @@ function eventTone(event: TraceEvent): string {
   return "default";
 }
 
+function groupLabel(event: TraceEvent): string {
+  return event.turn_id ?? "Session";
+}
+
+function formatDelta(current: TraceEvent, previous: TraceEvent | null): string {
+  if (!previous) return "+0.0 s";
+  const deltaMs = new Date(current.timestamp).getTime() - new Date(previous.timestamp).getTime();
+  if (!Number.isFinite(deltaMs) || deltaMs < 0) return "+0.0 s";
+  return `+${(deltaMs / 1000).toFixed(1)} s`;
+}
+
 export function App() {
   const [runId, setRunId] = useState("manual-run");
   const [state, setState] = useState<PokemonState | null>(null);
@@ -94,14 +104,25 @@ export function App() {
   const [wsConnected, setWsConnected] = useState(false);
   const [harnessAgents, setHarnessAgents] = useState<HarnessAgent[]>([]);
   const [selectedHarnessId, setSelectedHarnessId] = useState<string | null>(null);
+  const [traceFilters, setTraceFilters] = useState<Record<FilterType, boolean>>({
+    action: true,
+    decision: true,
+    lifecycle: true,
+    warning: true,
+  });
   const eventRunIdRef = useRef<string | null>(null);
 
   const selectedHarness = harnessAgents.find((h) => h.id === selectedHarnessId) ?? null;
 
   // Restore active run on page load
   useEffect(() => {
-    getState()
+    getHealth()
+      .then((health) => {
+        if (!health.active_run) return null;
+        return getState();
+      })
       .then((next) => {
+        if (!next) return;
         setState(next);
         setImageVersion((v) => v + 1);
         eventRunIdRef.current = next.run_id;
@@ -195,6 +216,12 @@ export function App() {
     if (harnessResponse.ok) setHarnessEvents(await harnessResponse.json());
   }
 
+  async function handleReloadTraces() {
+    const activeRunId = eventRunIdRef.current ?? state?.run_id;
+    if (!activeRunId) return;
+    await runAction(() => refreshTraces(activeRunId), false);
+  }
+
   async function handleStart() {
     const next = await runAction(() => startRun(runId), false);
     if (next) {
@@ -226,16 +253,22 @@ export function App() {
         <header className="topbar">
           <div>
             <h1>Pokemon Harness</h1>
-            <span>{API_BASE} {wsConnected ? "● connected" : "○ disconnected"}</span>
+            <span className="connection-status">
+              <span>API {API_BASE}</span>
+              <span>WebSocket {wsConnected ? "● connected" : "○ disconnected"}</span>
+            </span>
           </div>
-          <div className="run-controls">
-            <input value={runId} onChange={(e) => setRunId(e.target.value)} aria-label="Run id" />
-            <button onClick={handleStart} disabled={busy}>
-              <Play size={14} /> Start
-            </button>
-            <button onClick={handleStop} disabled={busy || !state}>
-              <Square size={14} /> Stop
-            </button>
+          <div className="emulator-controls" aria-label="Emulator controls">
+            <span>Emulator</span>
+            <div className="run-controls">
+              <input value={runId} onChange={(e) => setRunId(e.target.value)} aria-label="Run id" />
+              <button onClick={handleStart} disabled={busy}>
+                <Play size={14} /> Start run
+              </button>
+              <button onClick={handleStop} disabled={busy || !state}>
+                <Square size={14} /> Stop run
+              </button>
+            </div>
           </div>
         </header>
 
@@ -304,32 +337,44 @@ export function App() {
 
       <aside className="trace-pane">
         <header className="harness-header">
-          <h2>Harness</h2>
-          <div className="harness-controls">
-            <select
-              value={selectedHarnessId ?? ""}
-              onChange={(e) => setSelectedHarnessId(e.target.value || null)}
-              disabled={harnessAgents.length === 0}
-            >
-              {harnessAgents.length === 0
-                ? <option value="">No harness connected</option>
-                : harnessAgents.map((h) => (
-                    <option key={h.id} value={h.id}>{h.name}</option>
-                  ))}
-            </select>
-            <button
-              onClick={handleHarnessPlay}
-              disabled={busy || !selectedHarness || selectedHarness.status === "running"}
-            >
-              <Play size={14} /> Play
-            </button>
-            <button
-              onClick={handleHarnessStop}
-              disabled={busy || !selectedHarness || selectedHarness.status === "idle"}
-            >
-              <Square size={14} /> Stop
+          <div className="trace-title-row">
+            <div>
+              <h2>Agent</h2>
+              <span>{harnessEvents.length} events</span>
+            </div>
+            <button onClick={handleReloadTraces} disabled={busy || !eventRunIdRef.current}>
+              <RefreshCw size={14} /> Reload
             </button>
           </div>
+          <div className="agent-controls" aria-label="Agent controls">
+            <span>Agent</span>
+            <div className="harness-controls">
+              <select
+                value={selectedHarnessId ?? ""}
+                onChange={(e) => setSelectedHarnessId(e.target.value || null)}
+                disabled={harnessAgents.length === 0}
+              >
+                {harnessAgents.length === 0
+                  ? <option value="">No harness connected</option>
+                  : harnessAgents.map((h) => (
+                      <option key={h.id} value={h.id}>{h.name}</option>
+                    ))}
+              </select>
+              <button
+                onClick={handleHarnessPlay}
+                disabled={busy || !selectedHarness || selectedHarness.status === "running"}
+              >
+                <Play size={14} /> Play agent
+              </button>
+              <button
+                onClick={handleHarnessStop}
+                disabled={busy || !selectedHarness || selectedHarness.status === "idle"}
+              >
+                <Square size={14} /> Stop agent
+              </button>
+            </div>
+          </div>
+          <TraceFilters filters={traceFilters} onChange={setTraceFilters} />
           {selectedHarness && (
             <span className="harness-status" data-status={selectedHarness.status}>
               <Activity size={13} /> {selectedHarness.status}
@@ -341,7 +386,11 @@ export function App() {
         </header>
 
         <div className="harness-events">
-          <TraceList events={harnessEvents} isRunning={selectedHarness?.status === "running" || selectedHarness?.status === "starting"} />
+          <TraceList
+            events={harnessEvents}
+            filters={traceFilters}
+            isRunning={selectedHarness?.status === "running" || selectedHarness?.status === "starting"}
+          />
         </div>
       </aside>
     </main>
@@ -349,19 +398,73 @@ export function App() {
 }
 
 function Metric({ label, value }: { label: string; value: string | number }) {
+  const textValue = String(value);
   return (
     <div className="metric">
       <span>{label}</span>
-      <strong>{value}</strong>
+      <strong title={textValue}>{value}</strong>
     </div>
   );
 }
 
-function TraceList({ events, isRunning }: { events: TraceEvent[]; isRunning: boolean }) {
+function TraceFilters({
+  filters,
+  onChange,
+}: {
+  filters: Record<FilterType, boolean>;
+  onChange: Dispatch<SetStateAction<Record<FilterType, boolean>>>;
+}) {
+  return (
+    <div className="trace-filters" aria-label="Trace event filters">
+      {filterTypes.map((type) => (
+        <label key={type} className={filters[type] ? "selected" : ""}>
+          <input
+            type="checkbox"
+            checked={filters[type]}
+            onChange={(event) => {
+              const checked = event.currentTarget.checked;
+              onChange((current) => ({ ...current, [type]: checked }));
+            }}
+          />
+          {type}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function TraceList({
+  events,
+  filters,
+  isRunning,
+}: {
+  events: TraceEvent[];
+  filters: Record<FilterType, boolean>;
+  isRunning: boolean;
+}) {
   const listRef = useRef<HTMLOListElement | null>(null);
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [events.length, isRunning]);
+
+  const visibleEvents = events.filter((event) => {
+    if (!filterTypes.includes(event.type as FilterType)) return true;
+    return filters[event.type as FilterType];
+  });
+  const groupedEvents = visibleEvents.reduce<Array<{ label: string; events: TraceEvent[] }>>((groups, event) => {
+    const label = groupLabel(event);
+    const current = groups[groups.length - 1];
+    if (current?.label === label) {
+      current.events.push(event);
+    } else {
+      groups.push({ label, events: [event] });
+    }
+    return groups;
+  }, []);
+  const deltas = new Map<TraceEvent, string>();
+  visibleEvents.forEach((event, index) => {
+    deltas.set(event, formatDelta(event, visibleEvents[index - 1] ?? null));
+  });
 
   if (!events.length) {
     return (
@@ -371,10 +474,15 @@ function TraceList({ events, isRunning }: { events: TraceEvent[]; isRunning: boo
       </div>
     );
   }
+
+  if (!visibleEvents.length) {
+    return <div className="trace-empty">No events match the selected filters</div>;
+  }
+
   return (
     <ol className="trace-list" ref={listRef}>
-      {events.map((event, index) => (
-        <TraceItem key={`${event.timestamp}-${event.type}-${index}`} event={event} />
+      {groupedEvents.map((group) => (
+        <TraceGroup key={`${group.label}-${group.events[0]?.timestamp}`} group={group} deltas={deltas} />
       ))}
       {isRunning ? (
         <li className="trace-item trace-waiting">
@@ -386,29 +494,63 @@ function TraceList({ events, isRunning }: { events: TraceEvent[]; isRunning: boo
   );
 }
 
-function TraceItem({ event }: { event: TraceEvent }) {
+function TraceGroup({
+  group,
+  deltas,
+}: {
+  group: { label: string; events: TraceEvent[] };
+  deltas: Map<TraceEvent, string>;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  return (
+    <li className="trace-group">
+      <button className="trace-group-header" onClick={() => setCollapsed((value) => !value)}>
+        {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+        <span>{group.label}</span>
+        <em>{group.events.length}</em>
+      </button>
+      {!collapsed ? (
+        <ol>
+          {group.events.map((event, index) => {
+            return (
+              <TraceItem
+                key={`${event.timestamp}-${event.type}-${index}`}
+                event={event}
+                delta={deltas.get(event) ?? "+0.0 s"}
+              />
+            );
+          })}
+        </ol>
+      ) : null}
+    </li>
+  );
+}
+
+function TraceItem({ event, delta }: { event: TraceEvent; delta: string }) {
   const [expanded, setExpanded] = useState(false);
-  const thought = payloadText(event.payload, ["thought", "thinking", "reasoning", "raw_thought", "raw_response"]);
-  const modelOutput = payloadText(event.payload, ["raw_response", "model_output", "response", "content"]);
+  const [reasoningExpanded, setReasoningExpanded] = useState(false);
+  const reasoning = payloadText(event.payload, ["reasoning", "thought", "thinking", "raw_thought"]);
   const tone = eventTone(event);
   return (
-    <li onClick={() => setExpanded((e) => !e)} className="trace-item" data-tone={tone}>
-      <div className="trace-head">
+    <li className="trace-item" data-tone={tone}>
+      <button className="trace-head" onClick={() => setExpanded((e) => !e)}>
         <span className="trace-kind">
+          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           {tone === "action" ? <Gamepad2 size={14} /> : tone === "decision" ? <Bot size={14} /> : <MessageSquareText size={14} />}
           {eventLabel(event)}
         </span>
-        <time>{new Date(event.timestamp).toLocaleTimeString()}</time>
-      </div>
+        <time>{new Date(event.timestamp).toLocaleTimeString()} <span>{delta}</span></time>
+      </button>
       <p className="trace-summary">{summarizeEvent(event)}</p>
-      {thought ? (
-        <blockquote>
-          {thought}
-        </blockquote>
-      ) : modelOutput && modelOutput !== thought ? (
-        <blockquote>
-          {modelOutput}
-        </blockquote>
+      {reasoning ? (
+        <div className="reasoning-wrap">
+          <blockquote className={reasoningExpanded ? "reasoning expanded" : "reasoning"}>
+            {reasoning}
+          </blockquote>
+          <button className="reasoning-toggle" onClick={() => setReasoningExpanded((value) => !value)}>
+            {reasoningExpanded ? "Collapse reasoning" : "Expand reasoning"}
+          </button>
+        </div>
       ) : null}
       {expanded ? <pre>{formatPayload(event.payload)}</pre> : null}
     </li>

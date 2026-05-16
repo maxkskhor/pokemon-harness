@@ -68,6 +68,8 @@ class Session:
 
     def __post_init__(self) -> None:
         self.lock = asyncio.Lock()
+        self._screen_hash_frame: int | None = None
+        self._screen_hash_value: str | None = None
         self.rom_metadata = {
             "path": str(self.rom_path),
             "filename": self.rom_path.name,
@@ -123,7 +125,6 @@ class Session:
         return envelope
 
     def state_payload(self) -> dict[str, Any]:
-        png = self.emulator.screenshot_png()
         pokemon = read_pokemon_labels(self.symbols, self.emulator.read_memory_byte)
         return {
             "run_id": self.run_id,
@@ -135,10 +136,22 @@ class Session:
             "screen": {
                 "width": 160,
                 "height": 144,
-                "sha256": png_sha256(png),
+                "sha256": self.screen_sha256(),
             },
             "pokemon": pokemon,
         }
+
+    def invalidate_screen_cache(self) -> None:
+        self._screen_hash_frame = None
+        self._screen_hash_value = None
+
+    def screen_sha256(self) -> str:
+        if self._screen_hash_frame == self.emulator.frame and self._screen_hash_value is not None:
+            return self._screen_hash_value
+        digest = png_sha256(self.emulator.screenshot_png())
+        self._screen_hash_frame = self.emulator.frame
+        self._screen_hash_value = digest
+        return digest
 
 
 class RuntimeManager:
@@ -214,6 +227,7 @@ class RuntimeManager:
         async with session.lock:
             before = session.emulator.frame
             session.emulator.tick(request.frames)
+            session.invalidate_screen_cache()
             state = session.state_payload()
         await session.emit_env("step", {"frames": request.frames, "before_frame": before, "after_frame": state["frame"]})
         return state
@@ -223,6 +237,7 @@ class RuntimeManager:
         async with session.lock:
             before = session.emulator.frame
             session.emulator.press(request.button, request.frames)
+            session.invalidate_screen_cache()
             state = session.state_payload()
         await session.emit_env(
             "button_press",
@@ -246,9 +261,11 @@ class RuntimeManager:
                     if step.button is None:
                         raise HTTPException(status_code=422, detail="press steps require a button")
                     session.emulator.press(step.button, step.frames)
+                    session.invalidate_screen_cache()
                     executed.append({"type": "press", "button": step.button, "frames": step.frames})
                 else:
                     session.emulator.tick(step.frames)
+                    session.invalidate_screen_cache()
                     executed.append({"type": "wait", "frames": step.frames})
             state = session.state_payload()
         await session.emit_env(
@@ -288,6 +305,7 @@ class RuntimeManager:
                 raise HTTPException(status_code=404, detail=f"Save state not found: {request.name}")
         async with session.lock:
             session.emulator.load_state(path)
+            session.invalidate_screen_cache()
             state = session.state_payload()
         await session.emit_env("state_loaded", {"name": request.name, "path": str(path), "frame": state["frame"]})
         return state
@@ -311,6 +329,7 @@ class RuntimeManager:
             if frames:
                 async with session.lock:
                     session.emulator.tick(frames)
+                    session.invalidate_screen_cache()
                     frame = session.emulator.frame
                 now = asyncio.get_event_loop().time()
                 if now - last_emit >= 0.1:

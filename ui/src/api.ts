@@ -32,6 +32,11 @@ export interface PokemonState {
   pokemon: Record<string, number | null>;
 }
 
+export interface HealthState {
+  ok: boolean;
+  active_run: string | null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
@@ -45,6 +50,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(message || `${response.status} ${response.statusText}`);
   }
   return response.json() as Promise<T>;
+}
+
+export function getHealth(): Promise<HealthState> {
+  return request<HealthState>("/api/health");
 }
 
 export function startRun(runId: string): Promise<PokemonState> {

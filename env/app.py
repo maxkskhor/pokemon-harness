@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Deque
 
 from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +27,54 @@ from env.runtime import RuntimeManager
 from env.trace import TraceStore
 
 
+class HarnessRegistry:
+    def __init__(self, max_commands: int = 20) -> None:
+        self._records: dict[str, dict[str, Any]] = {}
+        self._commands: dict[str, Deque[str]] = {}
+        self._max_commands = max_commands
+
+    def register(self, name: str) -> str:
+        hid = uuid.uuid4().hex[:8]
+        now = datetime.now(timezone.utc).isoformat()
+        self._records[hid] = {
+            "id": hid,
+            "name": name,
+            "status": "idle",
+            "error": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        self._commands[hid] = deque(maxlen=self._max_commands)
+        return hid
+
+    def list(self) -> list[dict[str, Any]]:
+        return [record.copy() for record in self._records.values()]
+
+    def require(self, harness_id: str) -> None:
+        if harness_id not in self._records:
+            raise KeyError(harness_id)
+
+    def update(self, harness_id: str, **updates: Any) -> None:
+        self.require(harness_id)
+        self._records[harness_id].update(updates)
+        self._records[harness_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    def enqueue(self, harness_id: str, command: str) -> None:
+        self.require(harness_id)
+        self._commands[harness_id].append(command)
+
+    def poll(self, harness_id: str) -> str | None:
+        self.require(harness_id)
+        queue = self._commands[harness_id]
+        if not queue:
+            return None
+        return queue.popleft()
+
+    def unregister(self, harness_id: str) -> None:
+        self._records.pop(harness_id, None)
+        self._commands.pop(harness_id, None)
+
+
 def create_app(
     emulator_factory: Callable[[Path, Path | None], Emulator] | None = None,
     trace_store: TraceStore | None = None,
@@ -41,13 +90,8 @@ def create_app(
     manager = RuntimeManager(**manager_kwargs)
     api = FastAPI(title="Pokemon Harness Environment", version="0.1.0")
 
-    harness_registry: dict[str, dict[str, Any]] = {}
-    harness_commands: dict[str, str | None] = {}
+    harness_registry = HarnessRegistry()
     api.state.manager = manager
-
-    def touch_harness(harness_id: str, **updates: Any) -> None:
-        harness_registry[harness_id].update(updates)
-        harness_registry[harness_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     api.add_middleware(
         CORSMiddleware,
@@ -103,22 +147,11 @@ def create_app(
 
     @api.post("/api/harness/register")
     async def harness_register(request: HarnessRegisterRequest) -> dict[str, Any]:
-        hid = uuid.uuid4().hex[:8]
-        now = datetime.now(timezone.utc).isoformat()
-        harness_registry[hid] = {
-            "id": hid,
-            "name": request.name,
-            "status": "idle",
-            "error": None,
-            "created_at": now,
-            "updated_at": now,
-        }
-        harness_commands[hid] = None
-        return {"id": hid}
+        return {"id": harness_registry.register(request.name)}
 
     @api.get("/api/harness/list")
     async def harness_list() -> list[dict[str, Any]]:
-        return list(harness_registry.values())
+        return harness_registry.list()
 
     @api.post("/api/harness/event")
     async def harness_event(request: HarnessEventRequest) -> dict[str, object]:
@@ -126,47 +159,49 @@ def create_app(
 
     @api.post("/api/harness/{harness_id}/play")
     async def harness_play(harness_id: str) -> dict[str, Any]:
-        if harness_id not in harness_registry:
+        try:
+            harness_registry.update(harness_id, status="running", error=None)
+            harness_registry.enqueue(harness_id, "play")
+        except KeyError:
             raise HTTPException(status_code=404, detail="Harness not found")
-        touch_harness(harness_id, status="running", error=None)
-        harness_commands[harness_id] = "play"
         return {"ok": True}
 
     @api.post("/api/harness/{harness_id}/stop")
     async def harness_stop_cmd(harness_id: str) -> dict[str, Any]:
-        if harness_id not in harness_registry:
+        try:
+            harness_registry.update(harness_id, status="stopping")
+            harness_registry.enqueue(harness_id, "stop")
+        except KeyError:
             raise HTTPException(status_code=404, detail="Harness not found")
-        touch_harness(harness_id, status="stopping")
-        harness_commands[harness_id] = "stop"
         return {"ok": True}
 
     @api.get("/api/harness/{harness_id}/poll")
     async def harness_poll(harness_id: str) -> dict[str, Any]:
-        if harness_id not in harness_registry:
+        try:
+            cmd = harness_registry.poll(harness_id)
+        except KeyError:
             raise HTTPException(status_code=404, detail="Harness not found")
-        cmd = harness_commands.get(harness_id)
-        if cmd:
-            harness_commands[harness_id] = None
         return {"command": cmd}
 
     @api.post("/api/harness/{harness_id}/status")
     async def harness_status_update(harness_id: str, request: HarnessStatusRequest) -> dict[str, Any]:
-        if harness_id not in harness_registry:
+        try:
+            harness_registry.update(harness_id, status=request.status)
+        except KeyError:
             raise HTTPException(status_code=404, detail="Harness not found")
-        touch_harness(harness_id, status=request.status)
         return {"ok": True}
 
     @api.post("/api/harness/{harness_id}/error")
     async def harness_error_update(harness_id: str, request: HarnessErrorRequest) -> dict[str, Any]:
-        if harness_id not in harness_registry:
+        try:
+            harness_registry.update(harness_id, error=request.message, status="error")
+        except KeyError:
             raise HTTPException(status_code=404, detail="Harness not found")
-        touch_harness(harness_id, error=request.message, status="error")
         return {"ok": True}
 
     @api.post("/api/harness/{harness_id}/unregister")
     async def harness_unregister(harness_id: str) -> dict[str, Any]:
-        harness_registry.pop(harness_id, None)
-        harness_commands.pop(harness_id, None)
+        harness_registry.unregister(harness_id)
         return {"ok": True}
 
     @api.get("/api/runs/{run_id}/env-trace")

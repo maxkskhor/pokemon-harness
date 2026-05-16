@@ -11,9 +11,10 @@ test("pokemon harness UI starts a run and keeps the screen large", async ({ page
   await page.goto("http://127.0.0.1:5173/", { waitUntil: "networkidle" });
 
   await expect(page.getByRole("heading", { name: "Pokemon Harness" })).toBeVisible();
-  await expect(page.locator(".trace-empty")).toContainText(/No events yet|Waiting for the next agent event/);
+  await expect(page.getByText("WebSocket")).toBeVisible();
+  await page.getByLabel("Run id").fill(`smoke-${Date.now()}`);
 
-  await page.getByRole("button", { name: "Start", exact: true }).click();
+  await page.getByRole("button", { name: "Start run", exact: true }).click();
   await expect(page.locator("img.game-screen")).toBeVisible();
   await page.getByRole("button", { name: /^RIGHT$/ }).click();
 
