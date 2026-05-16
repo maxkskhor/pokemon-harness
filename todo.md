@@ -1,11 +1,3 @@
-- ~~Environment logs are unnecessary tedious and not helpful for visual, only the harness event.~~
-- ~~The scaling doesn't make sense, make it better scaled. like no scrolling. everything fits to a screen.~~
-- ~~For harness, we would like to skip the intro, names the character by default. and the first thing the harness should see is just Red sitting in the room in front of TV.~~
-- ~~The start_route.py doesn't really help me to setup my harness. looks too complicated. it shouldn't even have httpx, etc.~~
-- ~~what I would like is some simple interface to start with, that abstracts all these away.~~
-- ~~Specify in the readme on harness section, how I can connect my agent harness to this ui.~~
-- ~~Think from user setup perspective, I would like to be able just launch the script, open the ui, maybe select a harness from dropdown, and then click 'play' (not the same start in gameboy), then the agent will start taking screenshot, and reason and take steps, and when i clicked 'stop', the llm will be interrupted.~~
-- ~~give me this minimal scaffolding.~~
-- create a AGENTS.md and a CLAUDE.md that links to AGENTS.md.
 - connect this repo to my github: https://github.com/maxkskhor/pokemon-harness.git
-
+- On the harness logs, we should see directly the actions taken. like moves, and clicks. and also the thinking process. and it should be like chats, where it streams down instead.
+- The gameboy UI is way too small. There is a whole screen on the left panel that is useable.

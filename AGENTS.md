@@ -1,5 +1,9 @@
 # AGENTS.md — Non-obvious knowledge for AI agents working on this repo
 
+## Keeping the changelog
+
+After completing any meaningful work, append an entry to `CHANGELOG.md`. Group by date, use Added / Changed / Fixed / Removed sections. Be specific: name the file, what changed, and why if non-obvious.
+
 ## Pokemon Red intro sequence (setup_bedroom.py)
 
 - Oak's intro has **13 dialogue boxes** before the player naming screen.
