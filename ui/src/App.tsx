@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Pause, Play, RotateCcw, Save, Square } from "lucide-react";
+import { Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bot, Gamepad2, MessageSquareText, Pause, Play, RotateCcw, Save, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   API_BASE,
@@ -31,6 +31,56 @@ function eventLabel(event: TraceEvent): string {
 
 function formatPayload(payload: Record<string, unknown>): string {
   return JSON.stringify(payload, null, 2);
+}
+
+function payloadText(payload: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function formatPosition(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const position = value as Record<string, unknown>;
+  const frame = position.frame ?? "-";
+  const map = position.map_id ?? "-";
+  const x = position.x ?? "-";
+  const y = position.y ?? "-";
+  return `f${frame} map ${map} x/y ${x}/${y}`;
+}
+
+function summarizeEvent(event: TraceEvent): string {
+  const payload = event.payload;
+  if (event.type === "action") {
+    const button = payload.button ?? payload.action ?? payload.input ?? "-";
+    const frames = payload.frames ? ` for ${payload.frames}f` : "";
+    const before = formatPosition(payload.before);
+    const after = formatPosition(payload.after);
+    const movement = before && after ? ` (${before} -> ${after})` : "";
+    return `Pressed ${button}${frames}${movement}`;
+  }
+  if (event.type === "decision") {
+    const action = payload.action ?? payload.button ?? "-";
+    const location = payload.map_id !== undefined ? ` at map ${payload.map_id} x/y ${payload.x ?? "-"}/${payload.y ?? "-"}` : "";
+    return `Chose ${action}${location}`;
+  }
+  if (event.type === "lifecycle") {
+    return String(payload.status ?? event.type).replaceAll("_", " ");
+  }
+  if (event.type === "warning") {
+    return payloadText(payload, ["message", "warning"]) ?? "Warning";
+  }
+  return payloadText(payload, ["summary", "message", "content", "text"]) ?? event.type.replaceAll("_", " ");
+}
+
+function eventTone(event: TraceEvent): string {
+  if (event.type === "action") return "action";
+  if (event.type === "decision") return "decision";
+  if (event.type === "warning") return "warning";
+  if (event.type === "lifecycle") return "lifecycle";
+  return "default";
 }
 
 export function App() {
@@ -201,10 +251,10 @@ export function App() {
 
         <section className="control-band">
           <div className="dpad">
-            <button className="up" onClick={() => runAction(() => pressButton("UP"))} disabled={!state || busy}><ArrowUp size={18} /></button>
-            <button className="left" onClick={() => runAction(() => pressButton("LEFT"))} disabled={!state || busy}><ArrowLeft size={18} /></button>
-            <button className="right" onClick={() => runAction(() => pressButton("RIGHT"))} disabled={!state || busy}><ArrowRight size={18} /></button>
-            <button className="down" onClick={() => runAction(() => pressButton("DOWN"))} disabled={!state || busy}><ArrowDown size={18} /></button>
+            <button aria-label="UP" className="up" onClick={() => runAction(() => pressButton("UP"))} disabled={!state || busy}><ArrowUp size={18} /></button>
+            <button aria-label="LEFT" className="left" onClick={() => runAction(() => pressButton("LEFT"))} disabled={!state || busy}><ArrowLeft size={18} /></button>
+            <button aria-label="RIGHT" className="right" onClick={() => runAction(() => pressButton("RIGHT"))} disabled={!state || busy}><ArrowRight size={18} /></button>
+            <button aria-label="DOWN" className="down" onClick={() => runAction(() => pressButton("DOWN"))} disabled={!state || busy}><ArrowDown size={18} /></button>
           </div>
 
           <div className="button-cluster">
@@ -282,7 +332,7 @@ export function App() {
           </div>
           {selectedHarness && (
             <span className="harness-status" data-status={selectedHarness.status}>
-              {selectedHarness.status}
+              <Activity size={13} /> {selectedHarness.status}
             </span>
           )}
           {selectedHarness?.error && (
@@ -291,7 +341,7 @@ export function App() {
         </header>
 
         <div className="harness-events">
-          <TraceList events={harnessEvents} />
+          <TraceList events={harnessEvents} isRunning={selectedHarness?.status === "running" || selectedHarness?.status === "starting"} />
         </div>
       </aside>
     </main>
@@ -307,30 +357,59 @@ function Metric({ label, value }: { label: string; value: string | number }) {
   );
 }
 
-function TraceList({ events }: { events: TraceEvent[] }) {
+function TraceList({ events, isRunning }: { events: TraceEvent[]; isRunning: boolean }) {
+  const listRef = useRef<HTMLOListElement | null>(null);
+  useEffect(() => {
+    listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+  }, [events.length, isRunning]);
+
   if (!events.length) {
-    return <div className="trace-empty">No events yet</div>;
+    return (
+      <div className="trace-empty">
+        {isRunning ? <span className="run-pulse" /> : null}
+        {isRunning ? "Waiting for the next agent event..." : "No events yet"}
+      </div>
+    );
   }
   return (
-    <ol className="trace-list">
-      {events
-        .slice()
-        .reverse()
-        .map((event, index) => (
-          <TraceItem key={`${event.timestamp}-${event.type}-${index}`} event={event} />
-        ))}
+    <ol className="trace-list" ref={listRef}>
+      {events.map((event, index) => (
+        <TraceItem key={`${event.timestamp}-${event.type}-${index}`} event={event} />
+      ))}
+      {isRunning ? (
+        <li className="trace-item trace-waiting">
+          <span className="run-pulse" />
+          <span>Agent is running, waiting for the next event...</span>
+        </li>
+      ) : null}
     </ol>
   );
 }
 
 function TraceItem({ event }: { event: TraceEvent }) {
   const [expanded, setExpanded] = useState(false);
+  const thought = payloadText(event.payload, ["thought", "thinking", "reasoning", "raw_thought", "raw_response"]);
+  const modelOutput = payloadText(event.payload, ["raw_response", "model_output", "response", "content"]);
+  const tone = eventTone(event);
   return (
-    <li onClick={() => setExpanded((e) => !e)} className="trace-item">
+    <li onClick={() => setExpanded((e) => !e)} className="trace-item" data-tone={tone}>
       <div className="trace-head">
-        <span>{eventLabel(event)}</span>
+        <span className="trace-kind">
+          {tone === "action" ? <Gamepad2 size={14} /> : tone === "decision" ? <Bot size={14} /> : <MessageSquareText size={14} />}
+          {eventLabel(event)}
+        </span>
         <time>{new Date(event.timestamp).toLocaleTimeString()}</time>
       </div>
+      <p className="trace-summary">{summarizeEvent(event)}</p>
+      {thought ? (
+        <blockquote>
+          {thought}
+        </blockquote>
+      ) : modelOutput && modelOutput !== thought ? (
+        <blockquote>
+          {modelOutput}
+        </blockquote>
+      ) : null}
       {expanded ? <pre>{formatPayload(event.payload)}</pre> : null}
     </li>
   );

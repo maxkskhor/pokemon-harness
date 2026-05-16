@@ -76,7 +76,7 @@ class HarnessRegisterRequest(BaseModel):
 
 
 class HarnessStatusRequest(BaseModel):
-    status: str = Field(min_length=1, max_length=20)
+    status: Literal["idle", "starting", "running", "stopping", "error"] = Field(min_length=1, max_length=20)
 
 
 class HarnessErrorRequest(BaseModel):

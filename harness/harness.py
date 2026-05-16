@@ -50,7 +50,19 @@ class Harness:
 
     def press(self, button: str, frames: int = 8) -> None:
         """Press a GameBoy button."""
+        before = self._safe_state()
         self._client.press_button(button, frames)
+        after = self._safe_state()
+        self.emit(
+            "action",
+            {
+                "kind": "button_press",
+                "button": button,
+                "frames": frames,
+                "before": self._position_payload(before),
+                "after": self._position_payload(after),
+            },
+        )
 
     def emit(
         self,
@@ -118,40 +130,79 @@ class Harness:
 
             if cmd == "play" and (run_thread is None or not run_thread.is_alive()):
                 self._stop_event.clear()
+                self._set_status("starting")
                 try:
                     self._client.start_run(self._run_id)
                 except Exception as exc:
                     self._set_error(f"start_run failed: {exc}")
                     continue
+                self._emit_safe("lifecycle", {"status": "run_started", "run_id": self._run_id})
                 if self._load_state:
                     try:
                         self._client.load_state(self._load_state)
+                        self._emit_safe("lifecycle", {"status": "state_loaded", "name": self._load_state})
                     except Exception as exc:
-                        self._client.emit(
+                        self._emit_safe(
                             "warning",
                             {"message": f"Could not load save state '{self._load_state}': {exc}. Starting from ROM beginning."},
                         )
                 self._client.set_speed("1x")
+                self._set_status("running")
                 run_thread = threading.Thread(target=self._run_wrapped, daemon=True)
                 run_thread.start()
 
             elif cmd == "stop":
                 self._stop_event.set()
+                self._emit_safe("lifecycle", {"status": "stop_requested"})
                 if run_thread and run_thread.is_alive():
                     run_thread.join(timeout=10)
                 run_thread = None
                 self._set_status("idle")
+                self._emit_safe("lifecycle", {"status": "idle"})
 
             time.sleep(0.5)
 
     def _run_wrapped(self) -> None:
         try:
+            self._emit_safe("lifecycle", {"status": "agent_loop_started"})
             self.run()
+            self._emit_safe("lifecycle", {"status": "agent_loop_finished"})
         except Exception as exc:
             self._set_error(str(exc))
             print(f"run() raised: {exc}")
         finally:
             self._set_status("idle")
+
+    def _emit_safe(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        *,
+        turn_id: str | None = None,
+    ) -> None:
+        try:
+            self.emit(event_type, payload, turn_id=turn_id)
+        except Exception as exc:
+            print(f"Could not emit harness event '{event_type}': {exc}")
+
+    def _safe_state(self) -> dict[str, Any] | None:
+        try:
+            return self.state()
+        except Exception:
+            return None
+
+    def _position_payload(self, state: dict[str, Any] | None) -> dict[str, Any] | None:
+        if state is None:
+            return None
+        pokemon = state.get("pokemon", {})
+        if not isinstance(pokemon, dict):
+            return None
+        return {
+            "frame": state.get("frame"),
+            "map_id": pokemon.get("map_id"),
+            "x": pokemon.get("x"),
+            "y": pokemon.get("y"),
+        }
 
     def _set_status(self, status: str) -> None:
         try:

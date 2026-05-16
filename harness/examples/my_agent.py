@@ -76,6 +76,7 @@ class MyAgent(Harness):
             self.emit("decision", {
                 "turn": turn,
                 "action": action,
+                "raw_response": raw,
                 "map_id": pos.get("map_id"),
                 "x": pos.get("x"),
                 "y": pos.get("y"),

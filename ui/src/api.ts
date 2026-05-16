@@ -100,8 +100,10 @@ export function loadState(name: string): Promise<PokemonState> {
 export interface HarnessAgent {
   id: string;
   name: string;
-  status: "idle" | "running" | "stopping" | "error";
+  status: "idle" | "starting" | "running" | "stopping" | "error";
   error: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export function listHarnesses(): Promise<HarnessAgent[]> {
@@ -130,4 +132,3 @@ export function wsUrl(): string {
   base.pathname = "/ws/events";
   return base.toString();
 }
-

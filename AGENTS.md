@@ -4,6 +4,10 @@
 
 After completing any meaningful work, append an entry to `CHANGELOG.md`. Group by date, use Added / Changed / Fixed / Removed sections. Be specific: name the file, what changed, and why if non-obvious.
 
+## Keeping TODO.md
+
+`TODO.md` is only for open work. When a TODO item is completed, remove it from `TODO.md` instead of striking it through, and record the completed work in `CHANGELOG.md`.
+
 ## Pokemon Red intro sequence (setup_bedroom.py)
 
 - Oak's intro has **13 dialogue boxes** before the player naming screen.

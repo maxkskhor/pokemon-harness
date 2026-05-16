@@ -65,7 +65,7 @@ select {
 
 .app-shell {
   display: grid;
-  grid-template-columns: minmax(460px, 1fr) minmax(360px, 0.7fr);
+  grid-template-columns: minmax(560px, 1fr) minmax(360px, 430px);
   height: 100vh;
   overflow: hidden;
 }
@@ -124,14 +124,14 @@ select {
   overflow: hidden;
   background: #151a1c;
   border: 1px solid #20282a;
-  border-radius: 8px;
-  padding: 10px;
+  border-radius: 6px;
+  padding: 4px;
 }
 
 .game-screen {
   display: block;
-  max-height: 100%;
-  max-width: 100%;
+  width: 100%;
+  height: 100%;
   aspect-ratio: 160 / 144;
   object-fit: contain;
   image-rendering: pixelated;
@@ -278,6 +278,9 @@ select {
 }
 
 .harness-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 20px;
@@ -291,6 +294,7 @@ select {
   color: #1a5c3a;
 }
 
+.harness-status[data-status="starting"],
 .harness-status[data-status="stopping"] {
   background: #fde8cd;
   color: #7a4010;
@@ -318,13 +322,17 @@ select {
 .harness-events {
   flex: 1 1 0;
   min-height: 0;
-  overflow-y: auto;
+  display: flex;
+  overflow: hidden;
 }
 
 .trace-list {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 5px;
+  min-height: 0;
+  overflow: auto;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -332,11 +340,34 @@ select {
 
 .trace-item {
   min-width: 0;
-  padding: 6px 8px;
+  padding: 8px 9px;
   border: 1px solid #d7ddcf;
   border-radius: 6px;
   background: #ffffff;
   cursor: pointer;
+}
+
+.trace-item[data-tone="action"] {
+  border-color: #aacaba;
+  background: #f4fbf7;
+}
+
+.trace-item[data-tone="decision"] {
+  border-color: #c6d0e5;
+  background: #f6f8fd;
+}
+
+.trace-item[data-tone="warning"] {
+  border-color: #e1c67d;
+  background: #fff9e8;
+}
+
+.trace-waiting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #667165;
+  cursor: default;
 }
 
 .trace-item:hover {
@@ -352,7 +383,10 @@ select {
   font-weight: 600;
 }
 
-.trace-head span {
+.trace-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -363,6 +397,27 @@ select {
   color: #667165;
   font-weight: 400;
   flex-shrink: 0;
+}
+
+.trace-summary {
+  margin: 6px 0 0;
+  color: #17201c;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+.trace-item blockquote {
+  margin: 8px 0 0;
+  padding: 7px 9px;
+  border-left: 3px solid #8da0cf;
+  background: rgba(255, 255, 255, 0.7);
+  color: #2f3f59;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .trace-list pre,
@@ -385,6 +440,11 @@ select {
 }
 
 .trace-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   padding: 12px;
   border: 1px dashed #c4ccbb;
   border-radius: 6px;
@@ -392,9 +452,31 @@ select {
   font-size: 13px;
 }
 
+.run-pulse {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #2f8a65;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 @media (max-width: 1100px) {
   .app-shell {
     grid-template-columns: 1fr;
+    grid-template-rows: minmax(640px, 78vh) minmax(420px, 60vh);
     height: auto;
     overflow: auto;
   }
@@ -404,24 +486,23 @@ select {
   }
 
   .game-pane {
-    height: auto;
+    height: 100%;
     overflow: visible;
     border-right: 0;
     border-bottom: 1px solid #d7ddcf;
   }
 
   .screen-wrap {
-    height: 360px;
-    flex: none;
+    flex: 1 1 0;
   }
 
   .trace-pane {
-    height: auto;
-    overflow: visible;
+    height: 100%;
+    overflow: hidden;
   }
 
   .harness-events {
-    max-height: 400px;
+    max-height: none;
   }
 }
 

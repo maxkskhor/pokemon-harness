@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +26,7 @@ from env.trace import TraceStore, now_iso
 
 
 EmulatorFactory = Callable[[Path, Path | None], Emulator]
+logger = logging.getLogger("pokemon_harness.runtime")
 
 
 class EventBroker:
@@ -95,6 +97,8 @@ class Session:
                 "payload": payload,
             }
         await self.broker.publish(event)
+        if trace:
+            logger.info("env event run_id=%s type=%s frame=%s payload=%s", self.run_id, event_type, event["frame"], payload)
         return event
 
     async def emit_harness(self, event: HarnessEventRequest) -> dict[str, Any]:
@@ -108,6 +112,14 @@ class Session:
             turn_id=event.turn_id,
         )
         await self.broker.publish(envelope)
+        logger.info(
+            "harness event run_id=%s type=%s turn_id=%s frame=%s payload=%s",
+            self.run_id,
+            event.type,
+            event.turn_id,
+            envelope["frame"],
+            event.payload,
+        )
         return envelope
 
     def state_payload(self) -> dict[str, Any]:

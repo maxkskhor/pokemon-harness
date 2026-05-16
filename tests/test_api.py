@@ -85,3 +85,23 @@ def test_websocket_receives_env_and_harness_events(client: TestClient, fake_rom:
         assert second["source"] == "harness"
         assert second["type"] == "memory_write"
 
+
+def test_harness_registry_tracks_status_timestamps(client: TestClient) -> None:
+    registered = client.post("/api/harness/register", json={"name": "Smoke Agent"}).json()
+    harness_id = registered["id"]
+
+    play = client.post(f"/api/harness/{harness_id}/play")
+    assert play.status_code == 200
+
+    listed = client.get("/api/harness/list").json()
+    agent = next(agent for agent in listed if agent["id"] == harness_id)
+    assert agent["status"] == "running"
+    assert agent["error"] is None
+    assert agent["created_at"]
+    assert agent["updated_at"]
+
+    status = client.post(f"/api/harness/{harness_id}/status", json={"status": "starting"})
+    assert status.status_code == 200
+
+    invalid = client.post(f"/api/harness/{harness_id}/status", json={"status": "wedged"})
+    assert invalid.status_code == 422

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -43,6 +44,10 @@ def create_app(
     harness_registry: dict[str, dict[str, Any]] = {}
     harness_commands: dict[str, str | None] = {}
     api.state.manager = manager
+
+    def touch_harness(harness_id: str, **updates: Any) -> None:
+        harness_registry[harness_id].update(updates)
+        harness_registry[harness_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     api.add_middleware(
         CORSMiddleware,
@@ -99,7 +104,15 @@ def create_app(
     @api.post("/api/harness/register")
     async def harness_register(request: HarnessRegisterRequest) -> dict[str, Any]:
         hid = uuid.uuid4().hex[:8]
-        harness_registry[hid] = {"id": hid, "name": request.name, "status": "idle", "error": None}
+        now = datetime.now(timezone.utc).isoformat()
+        harness_registry[hid] = {
+            "id": hid,
+            "name": request.name,
+            "status": "idle",
+            "error": None,
+            "created_at": now,
+            "updated_at": now,
+        }
         harness_commands[hid] = None
         return {"id": hid}
 
@@ -115,8 +128,7 @@ def create_app(
     async def harness_play(harness_id: str) -> dict[str, Any]:
         if harness_id not in harness_registry:
             raise HTTPException(status_code=404, detail="Harness not found")
-        harness_registry[harness_id]["status"] = "running"
-        harness_registry[harness_id]["error"] = None
+        touch_harness(harness_id, status="running", error=None)
         harness_commands[harness_id] = "play"
         return {"ok": True}
 
@@ -124,7 +136,7 @@ def create_app(
     async def harness_stop_cmd(harness_id: str) -> dict[str, Any]:
         if harness_id not in harness_registry:
             raise HTTPException(status_code=404, detail="Harness not found")
-        harness_registry[harness_id]["status"] = "stopping"
+        touch_harness(harness_id, status="stopping")
         harness_commands[harness_id] = "stop"
         return {"ok": True}
 
@@ -141,15 +153,14 @@ def create_app(
     async def harness_status_update(harness_id: str, request: HarnessStatusRequest) -> dict[str, Any]:
         if harness_id not in harness_registry:
             raise HTTPException(status_code=404, detail="Harness not found")
-        harness_registry[harness_id]["status"] = request.status
+        touch_harness(harness_id, status=request.status)
         return {"ok": True}
 
     @api.post("/api/harness/{harness_id}/error")
     async def harness_error_update(harness_id: str, request: HarnessErrorRequest) -> dict[str, Any]:
         if harness_id not in harness_registry:
             raise HTTPException(status_code=404, detail="Harness not found")
-        harness_registry[harness_id]["error"] = request.message
-        harness_registry[harness_id]["status"] = "error"
+        touch_harness(harness_id, error=request.message, status="error")
         return {"ok": True}
 
     @api.post("/api/harness/{harness_id}/unregister")
