@@ -1,0 +1,24 @@
+.DS_Store
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pyc
+
+# Local upstream checkout and generated game artifacts.
+third_party/*
+!third_party/.gitkeep
+roms/*
+!roms/.gitkeep
+states/*
+!states/.gitkeep
+runs/*
+!runs/.gitkeep
+
+# Frontend artifacts.
+ui/node_modules/
+ui/dist/
+ui/*.tsbuildinfo
+ui/vite.config.js
+ui/vite.config.d.ts
