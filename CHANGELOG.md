@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-05-17 (LLM client retry layer)
+
+### Added
+- `harness/llm.py` — added a reusable LLM client with provider presets, OpenAI-compatible provider adapter, retry/backoff for 429/5xx/network failures, normalized response metadata, and structured `LLMCallError` payloads.
+- `tests/test_llm_client.py` — added regression coverage for retry success, retry exhaustion, and non-retryable provider errors.
+- `README.md` — documented the reusable LLM client and provider extension points for future OpenAI-compatible or custom adapters.
+
+### Changed
+- `harness/examples/my_agent.py` — replaced the direct OpenRouter SDK call with `LLMClient`, and now emits provider name plus retry attempt count in `llm_call` traces.
+- `harness/__init__.py` — exported the reusable LLM client helpers for future harnesses.
+- `tests/test_my_agent.py` — updated the example-agent tests around the reusable client and added coverage that exhausted LLM failures emit `llm_error` before surfacing.
+- `ui/pokemon-harness-smoke.spec.js` — changed the initial page wait from `networkidle` to `domcontentloaded`, removed the stale RIGHT-button click now that the UI is observation-only, and aligned the screen-size assertion with the wider trace pane.
+
 ## 2026-05-17 (UI refinements)
 
 ### Changed

@@ -137,6 +137,27 @@ if __name__ == "__main__":
 
 A minimal working template is at `harness/examples/my_agent.py`.
 
+### Reusable LLM client
+
+`harness.llm.LLMClient` wraps provider calls with retry/backoff and normalized response/error payloads. The example agent uses OpenRouter by default:
+
+```python
+from harness.llm import LLMClient, provider_from_env
+
+llm = LLMClient(provider_from_env("openrouter"))
+response = llm.chat(messages, model="qwen/qwen3.6-flash")
+```
+
+Built-in provider presets:
+
+| Preset | Env var | Notes |
+|---|---|---|
+| `openrouter` | `OPENROUTER_API_KEY` | Default example path; supports OpenRouter model IDs such as `qwen/qwen3.6-flash` |
+| `openai` | `OPENAI_API_KEY` | Uses the OpenAI SDK default base URL |
+| `gemini` | `GEMINI_API_KEY` | Uses Gemini's OpenAI-compatible endpoint |
+
+For another OpenAI-compatible provider, pass your own `LLMProviderConfig`. For a provider with a different API shape, implement the small `LLMProvider` protocol (`name`, `default_model`, and `complete(...)`) and keep the same retry/error handling.
+
 ### Running your agent with the UI
 
 1. Start the backend and UI: `scripts/dev.sh`

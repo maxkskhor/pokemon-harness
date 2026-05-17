@@ -15,6 +15,7 @@ from harness.examples.my_agent import (
     _strip_image_data,
     _strip_think_tags,
 )
+from harness.llm import LLMCallError, LLMResponse
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -37,6 +38,25 @@ def _fake_response(content: str, reasoning: str | None = None, model_extra: dict
     msg = _fake_message(content, reasoning=reasoning, model_extra=model_extra)
     choice = SimpleNamespace(message=msg)
     return SimpleNamespace(choices=[choice])
+
+
+def _llm_response(
+    content: str,
+    *,
+    reasoning: str | None = None,
+    usage: dict[str, int | None] | None = None,
+    attempts: int = 1,
+) -> LLMResponse:
+    return LLMResponse(
+        provider="fake",
+        model="fake-model",
+        content=content,
+        reasoning=reasoning,
+        usage=usage or {"prompt_tokens": None, "completion_tokens": None, "total_tokens": None},
+        latency_ms=12,
+        attempts=attempts,
+        raw_response=SimpleNamespace(),
+    )
 
 
 # ── _extract_reasoning ────────────────────────────────────────────────────────
@@ -112,23 +132,13 @@ def _make_agent() -> MyAgent:
     client.press_button.return_value = {}
     with patch.dict("os.environ", {"OPENROUTER_API_KEY": "fake-key"}):
         agent = MyAgent(load_state=None, client_factory=lambda _: client)
-    # Replace internal LLM with a mock.
     agent._llm = MagicMock()
     return agent
 
 
 def _stub_response(agent: MyAgent, button: str, reasoning: str | None = None) -> None:
-    """Make agent._llm.chat.completions.create return a stub response."""
-    msg = MagicMock()
-    msg.content = button
-    if reasoning is not None:
-        msg.reasoning = reasoning
-        msg.model_extra = None
-    else:
-        del msg.reasoning
-        msg.model_extra = {}
-    choice = SimpleNamespace(message=msg)
-    agent._llm.chat.completions.create.return_value = SimpleNamespace(choices=[choice])
+    """Make agent._llm.chat return a stub response."""
+    agent._llm.chat.return_value = _llm_response(button, reasoning=reasoning)
 
 
 def test_history_starts_with_system_message():
@@ -150,13 +160,9 @@ def test_history_grows_with_turns():
         call_count += 1
         if call_count >= 3:
             agent._stop_event.set()
-        msg = MagicMock()
-        msg.content = "UP"
-        del msg.reasoning
-        msg.model_extra = {}
-        return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+        return _llm_response("UP")
 
-    agent._llm.chat.completions.create.side_effect = side_effect
+    agent._llm.chat.side_effect = side_effect
     agent.run()
 
     # system + 3 user + 3 assistant = 7
@@ -176,13 +182,9 @@ def test_history_capped_at_max_turns():
         call_count += 1
         if call_count >= turns:
             agent._stop_event.set()
-        msg = MagicMock()
-        msg.content = "UP"
-        del msg.reasoning
-        msg.model_extra = {}
-        return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+        return _llm_response("UP")
 
-    agent._llm.chat.completions.create.side_effect = side_effect
+    agent._llm.chat.side_effect = side_effect
     agent.run()
 
     # 1 system + MAX_HISTORY_TURNS * 2 pairs
@@ -199,16 +201,12 @@ def test_history_passes_all_messages_to_llm():
     def side_effect(*args, **kwargs):
         nonlocal call_count
         call_count += 1
-        calls.append(list(kwargs.get("messages", args[0] if args else [])))
+        calls.append(list(args[0]))
         if call_count >= 2:
             agent._stop_event.set()
-        msg = MagicMock()
-        msg.content = "DOWN"
-        del msg.reasoning
-        msg.model_extra = {}
-        return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+        return _llm_response("DOWN")
 
-    agent._llm.chat.completions.create.side_effect = side_effect
+    agent._llm.chat.side_effect = side_effect
     agent.run()
 
     # Second call should include system + user1 + assistant1 + user2
@@ -224,13 +222,9 @@ def test_reasoning_included_in_emit():
 
     def side_effect(*args, **kwargs):
         agent._stop_event.set()
-        msg = MagicMock()
-        msg.content = "UP"
-        msg.reasoning = "I think I should go north"
-        msg.model_extra = None
-        return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+        return _llm_response("UP", reasoning="I think I should go north")
 
-    agent._llm.chat.completions.create.side_effect = side_effect
+    agent._llm.chat.side_effect = side_effect
     agent.run()
 
     emitted = agent._client.emit.call_args_list
@@ -249,14 +243,12 @@ def test_llm_call_event_includes_sanitized_messages_and_latency():
 
     def side_effect(*args, **kwargs):
         agent._stop_event.set()
-        msg = MagicMock()
-        msg.content = "UP"
-        del msg.reasoning
-        msg.model_extra = {}
-        usage = SimpleNamespace(prompt_tokens=10, completion_tokens=2, total_tokens=12)
-        return SimpleNamespace(choices=[SimpleNamespace(message=msg)], usage=usage)
+        return _llm_response(
+            "UP",
+            usage={"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+        )
 
-    agent._llm.chat.completions.create.side_effect = side_effect
+    agent._llm.chat.side_effect = side_effect
     agent.run()
 
     emitted = agent._client.emit.call_args_list
@@ -270,18 +262,58 @@ def test_llm_call_event_includes_sanitized_messages_and_latency():
     assert isinstance(payload["usage"]["latency_ms"], int)
 
 
+def test_llm_call_emit_includes_provider_and_retry_attempts():
+    agent = _make_agent()
+
+    def side_effect(*args, **kwargs):
+        agent._stop_event.set()
+        return _llm_response(
+            "RIGHT",
+            usage={"prompt_tokens": 12, "completion_tokens": 1, "total_tokens": 13},
+            attempts=3,
+        )
+
+    agent._llm.chat.side_effect = side_effect
+
+    agent.run()
+
+    llm_call = next(c for c in agent._client.emit.call_args_list if c.args[0] == "llm_call")
+    payload = llm_call.args[1]
+    assert payload["provider"] == "fake"
+    assert payload["model"] == "fake-model"
+    assert payload["usage"]["attempts"] == 3
+
+
+def test_llm_error_emitted_before_raising():
+    agent = _make_agent()
+    error = LLMCallError(
+        "fake failed",
+        provider="fake",
+        model="fake-model",
+        attempts=3,
+        retryable=True,
+        status_code=429,
+        raw="rate limited upstream",
+    )
+    agent._llm.chat.side_effect = error
+
+    with pytest.raises(LLMCallError):
+        agent.run()
+
+    llm_error = next(c for c in agent._client.emit.call_args_list if c.args[0] == "llm_error")
+    payload = llm_error.args[1]
+    assert payload["status_code"] == 429
+    assert payload["raw"] == "rate limited upstream"
+
+
 def test_user_turn_message_format():
     agent = _make_agent()
 
     def side_effect(*args, **kwargs):
         agent._stop_event.set()
-        msg = MagicMock()
-        msg.content = "RIGHT"
-        del msg.reasoning
-        msg.model_extra = {}
-        return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+        return _llm_response("RIGHT")
 
-    agent._llm.chat.completions.create.side_effect = side_effect
+    agent._llm.chat.side_effect = side_effect
     agent.run()
 
     # The user message content should have image_url and text

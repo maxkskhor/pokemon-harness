@@ -14,20 +14,24 @@ Run:
 from __future__ import annotations
 
 import base64
-import os
-import re
 import threading
-import time
 from typing import Any
 
-import openai
 from dotenv import load_dotenv
 
 from harness import PokemonAgent
+from harness.llm import (
+    LLMCallError,
+    LLMClient,
+    PROVIDER_PRESETS,
+    extract_reasoning as _extract_reasoning,
+    provider_from_env,
+    strip_think_tags as _strip_think_tags,
+)
 
 load_dotenv()
 
-MODEL = "qwen/qwen3.6-flash"
+MODEL = PROVIDER_PRESETS["openrouter"].default_model
 VALID_BUTTONS = {"A", "B", "UP", "DOWN", "LEFT", "RIGHT", "START", "SELECT"}
 MAX_HISTORY_TURNS = 5
 
@@ -41,26 +45,6 @@ SYSTEM_PROMPT = (
 )
 
 USER_TURN_TEXT = "What button should I press next?"
-
-
-def _extract_reasoning(response: Any) -> str | None:
-    msg = response.choices[0].message
-    # OpenRouter exposes reasoning as a direct field or in model_extra
-    reasoning = getattr(msg, "reasoning", None)
-    if not reasoning and hasattr(msg, "model_extra") and msg.model_extra:
-        reasoning = msg.model_extra.get("reasoning")
-    if reasoning:
-        return str(reasoning).strip()
-    # Fall back to <think>...</think> tags in content
-    content = msg.content or ""
-    match = re.search(r"<think>(.*?)</think>", content, re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    return None
-
-
-def _strip_think_tags(text: str) -> str:
-    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
 def _strip_image_data(value: Any) -> Any:
@@ -78,24 +62,12 @@ def _strip_image_data(value: Any) -> Any:
     return value
 
 
-def _usage_payload(response: Any) -> dict[str, int | None]:
-    usage = getattr(response, "usage", None)
-    return {
-        "prompt_tokens": getattr(usage, "prompt_tokens", None),
-        "completion_tokens": getattr(usage, "completion_tokens", None),
-        "total_tokens": getattr(usage, "total_tokens", None),
-    }
-
-
 class MyAgent(PokemonAgent):
     name = "My Agent"
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self._llm: Any = openai.OpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=os.environ["OPENROUTER_API_KEY"],
-        )
+        self._llm = LLMClient(provider_from_env("openrouter"))
         self._history: list[dict[str, Any]] = []
         # restore_history runs on the control-loop thread (WS-triggered rewinds);
         # run() mutates _history on the run thread. Guard every access.
@@ -135,22 +107,23 @@ class MyAgent(PokemonAgent):
                 self._history.append(user_msg)
                 messages_snapshot = list(self._history)
 
-            started_at = time.perf_counter()
-            response = self._llm.chat.completions.create(
-                model=MODEL,
-                messages=messages_snapshot,
-            )
-            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            try:
+                response = self._llm.chat(messages_snapshot, model=MODEL)
+            except LLMCallError as exc:
+                self.emit("llm_error", exc.to_payload(), turn_id=turn_id)
+                raise
 
-            raw = (response.choices[0].message.content or "").strip()
-            reasoning = _extract_reasoning(response)
+            raw = response.content
+            reasoning = response.reasoning
             self.emit("llm_call", {
-                "model": MODEL,
+                "provider": response.provider,
+                "model": response.model,
                 "messages": _strip_image_data(messages_snapshot),
                 "response": raw,
                 "usage": {
-                    **_usage_payload(response),
-                    "latency_ms": latency_ms,
+                    **response.usage,
+                    "latency_ms": response.latency_ms,
+                    "attempts": response.attempts,
                 },
             }, turn_id=turn_id)
 
