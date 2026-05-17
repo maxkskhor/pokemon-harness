@@ -283,6 +283,7 @@ def test_list_runs_marks_active_run(client: TestClient, fake_rom: Path, fake_sym
     assert active is not None
     assert active["active"] is True
     assert active["has_env"] is True
+    assert active["bytes"] > 0
 
 
 def test_list_runs_sorted_newest_first(client: TestClient, fake_rom: Path, fake_sym: Path) -> None:

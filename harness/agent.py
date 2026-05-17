@@ -9,7 +9,7 @@ import uuid
 import sys
 from pathlib import Path
 from queue import Empty, Queue
-from typing import Any
+from typing import Any, Callable
 
 from harness.client import PokemonEnvClient
 
@@ -31,12 +31,13 @@ class PokemonAgent:
         base_url: str = "http://127.0.0.1:8000",
         run_id: str | None = None,
         load_state: str | None = "bedroom",
+        client_factory: Callable[[str], PokemonEnvClient] | None = None,
     ) -> None:
         self._base_url = base_url
         self._run_id_prefix = run_id or "agent"
         self._run_id = self._new_run_id()
         self._load_state = load_state
-        self._client = PokemonEnvClient(base_url)
+        self._client = (client_factory or PokemonEnvClient)(base_url)
         self._stop_event = threading.Event()
         self._shutdown_event = threading.Event()
         self._cmd_queue: Queue[str] = Queue()

@@ -14,7 +14,7 @@ cleanup() {
 trap cleanup EXIT
 
 cd "$ROOT_DIR"
-UV_CACHE_DIR=/private/tmp/uv-cache uv run uvicorn env.app:app --host 127.0.0.1 --port 8000 &
+uv run uvicorn env.app:app --host 127.0.0.1 --port 8000 &
 BACKEND_PID=$!
 
 cd "$ROOT_DIR/ui"
@@ -24,4 +24,3 @@ FRONTEND_PID=$!
 echo "Backend:  http://127.0.0.1:8000"
 echo "Frontend: http://127.0.0.1:5173"
 wait
-

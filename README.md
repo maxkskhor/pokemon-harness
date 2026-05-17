@@ -14,7 +14,7 @@ uv run python scripts/setup_bedroom.py  # create bedroom save state (backend mus
 **Every session:**
 ```bash
 scripts/dev.sh                                   # terminal 1: backend + UI
-uv run python harness/examples/my_agent.py       # terminal 2: your agent
+uv run python -m harness.examples.my_agent       # terminal 2: your agent
 # Open http://localhost:5173 → select agent from dropdown → click Play
 ```
 
@@ -113,13 +113,13 @@ This boots the game at max speed, skips the intro dialogue, names the character 
 
 ### Writing your agent
 
-Create a subclass of `Harness`, set a name, and implement `run()`:
+Create a subclass of `PokemonAgent`, set a name, and implement `run()`:
 
 ```python
 # my_agent.py
-from harness.harness import Harness
+from harness import PokemonAgent
 
-class MyAgent(Harness):
+class MyAgent(PokemonAgent):
     name = "My Agent"
 
     def run(self) -> None:
@@ -164,6 +164,14 @@ Inside `run()`, these methods are available:
 | `load_state(name)` | Load a run-local or shared emulator state by name |
 | `emit(type, payload, *, turn_id=None)` | Send an event to the UI trace panel |
 | `should_stop()` | True when Stop was clicked — check this in your loop |
+
+For sequence payloads, the helper builders are exported from the package root:
+
+```python
+from harness import press, wait
+
+self.sequence([press("RIGHT"), wait(12), press("A")])
+```
 
 ### Other utilities
 

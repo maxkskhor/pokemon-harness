@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-05-17 (correctness and DX cleanup)
+
+### Added
+- `scripts/clean-runs.sh` — dry-run capable cleanup script for removing `runs/<id>/` and matching `states/<id>/` directories older than a configurable age, skipping `shared`.
+- `ui/playwright.config.ts`, `ui/package.json`, `scripts/verify.sh` — wired `npm run test:smoke` through Playwright with backend/frontend web servers, and added it after the production build in full verification.
+- `tests/test_replay.py` — replay regression coverage that `replay_marker` events are emitted before replayed actions.
+
+### Changed
+- `env/models.py`, `env/runtime.py` — safe-name validation now uses `env.trace.ensure_safe_name` consistently. State and agent-side state paths resolve under `states_dir` before use for defense-in-depth against traversal.
+- `harness/agent.py`, `tests/test_harness_base.py`, `tests/test_my_agent.py` — `PokemonAgent` accepts an optional `client_factory`, so tests inject fake clients without assigning to private `_client`.
+- `harness/replay.py` — emits a `replay_marker` harness event before each replayed env action, carrying the source run id, source frame, and source event type.
+- `scripts/dev.sh` — no longer hard-codes `UV_CACHE_DIR=/private/tmp/uv-cache`; it now respects the caller's environment.
+- `README.md`, `harness/examples/my_agent.py` — document module-form example-agent invocation (`python -m harness.examples.my_agent`) and correct the README agent base-class import.
+- `harness/__init__.py`, `README.md` — export and document the `press()` / `wait()` helper builders for `sequence()` payloads.
+- `env/runtime.py`, `ui/src/api.ts`, `ui/src/App.tsx` — run summaries now include on-disk byte size and the run picker displays it.
+- `ui/src/styles.css` — compacted the desktop state grid and checkpoint panel so the emulator screen keeps priority on the 1440×900 smoke viewport.
+- `ui/pokemon-harness-smoke.spec.js` — cleans up its temporary run/state directories after execution.
+
 ## 2026-05-17 (agent-history-aware checkpoints — true rewind)
 
 ### Added

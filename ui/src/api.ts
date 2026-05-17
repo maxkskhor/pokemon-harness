@@ -140,6 +140,7 @@ export interface RunSummary {
   has_env: boolean;
   has_harness: boolean;
   active: boolean;
+  bytes: number;
 }
 
 export function listRuns(): Promise<RunSummary[]> {

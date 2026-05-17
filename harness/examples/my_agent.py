@@ -9,7 +9,7 @@ Add your OpenRouter key to .env:
   OPENROUTER_API_KEY=sk-or-...
 
 Run:
-  uv run python harness/examples/my_agent.py
+  uv run python -m harness.examples.my_agent
 """
 from __future__ import annotations
 

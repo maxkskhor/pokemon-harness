@@ -86,15 +86,15 @@ def test_strip_think_tags_no_tags():
 
 def _make_agent() -> MyAgent:
     """Return a MyAgent with all external dependencies mocked out."""
+    client = MagicMock()
+    client.get_state.return_value = {"frame": 1, "pokemon": {"map_id": 38, "x": 3, "y": 6}}
+    client.client = MagicMock()
+    client.client.get.return_value = MagicMock(content=b"\x89PNG\r\n", status_code=200)
+    client.emit.return_value = {}
+    client.press_button.return_value = {}
     with patch.dict("os.environ", {"OPENROUTER_API_KEY": "fake-key"}):
-        agent = MyAgent(load_state=None)
-    # Replace internal client and LLM with mocks
-    agent._client = MagicMock()
-    agent._client.get_state.return_value = {"frame": 1, "pokemon": {"map_id": 38, "x": 3, "y": 6}}
-    agent._client.client = MagicMock()
-    agent._client.client.get.return_value = MagicMock(content=b"\x89PNG\r\n", status_code=200)
-    agent._client.emit.return_value = {}
-    agent._client.press_button.return_value = {}
+        agent = MyAgent(load_state=None, client_factory=lambda _: client)
+    # Replace internal LLM with a mock.
     agent._llm = MagicMock()
     return agent
 

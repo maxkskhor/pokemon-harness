@@ -23,7 +23,7 @@ from env.models import (
 )
 from env.paths import RUNS_DIR, STATES_DIR, default_rom_path, default_symbol_path
 from env.symbols import SymbolMap, parse_sym_file, read_pokemon_labels
-from env.trace import TraceStore, now_iso
+from env.trace import TraceStore, ensure_safe_name, now_iso
 
 
 EmulatorFactory = Callable[[Path, Path | None], Emulator]
@@ -50,6 +50,17 @@ def _list_state_files(directory: Path, frames_by_name: dict[str, int]) -> list[d
     # Newest first — most useful for "rewind to the last checkpoint".
     out.sort(key=lambda entry: entry["modified_at"], reverse=True)
     return out
+
+
+def _directory_size(path: Path) -> int:
+    total = 0
+    for child in path.rglob("*"):
+        try:
+            if child.is_file():
+                total += child.stat().st_size
+        except OSError:
+            continue
+    return total
 
 
 class EventBroker:
@@ -395,10 +406,10 @@ class RuntimeManager:
         path = self._state_path(session.run_id, request.name)
         sidecar = self._agent_state_path(session.run_id, request.name)
         if not path.exists():
-            shared_path = self.states_dir / "shared" / f"{request.name}.state"
+            shared_path = self._shared_state_path(request.name)
             if shared_path.exists():
                 path = shared_path
-                sidecar = self.states_dir / "shared" / f"{request.name}.agent.json"
+                sidecar = self._shared_agent_state_path(request.name)
             else:
                 raise HTTPException(status_code=404, detail=f"Save state not found: {request.name}")
         agent_state: dict[str, Any] | None = None
@@ -442,8 +453,9 @@ class RuntimeManager:
         return path.read_bytes()
 
     def list_run_states(self, run_id: str) -> list[dict[str, Any]]:
-        run_states_dir = self.states_dir / run_id
-        frames_by_name = self._frames_by_save_name(run_id)
+        safe_run_id = self._safe_name(run_id, "run_id")
+        run_states_dir = self.states_dir / safe_run_id
+        frames_by_name = self._frames_by_save_name(safe_run_id)
         return _list_state_files(run_states_dir, frames_by_name)
 
     def list_shared_states(self) -> list[dict[str, Any]]:
@@ -469,14 +481,12 @@ class RuntimeManager:
                 "has_env": env_path.exists(),
                 "has_harness": harness_path.exists(),
                 "active": run_dir.name == active_run_id,
+                "bytes": _directory_size(run_dir),
             })
         out.sort(key=lambda entry: entry["modified_at"], reverse=True)
         return out
 
     def delete_state(self, run_id: str, name: str) -> None:
-        # Reject names outside the safe alphabet up front so we cannot escape the run dir.
-        if not all(char.isalnum() or char in ("-", "_") for char in name) or not name:
-            raise HTTPException(status_code=422, detail="invalid state name")
         path = self._state_path(run_id, name)
         if not path.exists():
             raise HTTPException(status_code=404, detail="state not found")
@@ -518,18 +528,36 @@ class RuntimeManager:
             await asyncio.sleep(delays[mode])
 
     def _state_path(self, run_id: str, name: str) -> Path:
-        return self.states_dir / run_id / f"{name}.state"
+        return self._state_file_path(run_id, name, ".state")
 
     def _agent_state_path(self, run_id: str, name: str) -> Path:
-        return self.states_dir / run_id / f"{name}.agent.json"
+        return self._state_file_path(run_id, name, ".agent.json")
+
+    def _shared_state_path(self, name: str) -> Path:
+        return self._state_file_path("shared", name, ".state")
+
+    def _shared_agent_state_path(self, name: str) -> Path:
+        return self._state_file_path("shared", name, ".agent.json")
+
+    def _state_file_path(self, run_id: str, name: str, suffix: str) -> Path:
+        safe_run_id = self._safe_name(run_id, "run_id")
+        safe_name = self._safe_name(name, "state name")
+        states_root = self.states_dir.resolve()
+        path = (states_root / safe_run_id / f"{safe_name}{suffix}").resolve()
+        if not path.is_relative_to(states_root):
+            raise HTTPException(status_code=422, detail="state path escapes states directory")
+        return path
+
+    def _safe_name(self, value: str, label: str) -> str:
+        try:
+            return ensure_safe_name(value, label)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     def read_agent_state(self, run_id: str, name: str) -> dict[str, Any]:
-        # Validation mirrors delete_state — keep traversal off-limits.
-        if not all(char.isalnum() or char in ("-", "_") for char in name) or not name:
-            raise HTTPException(status_code=422, detail="invalid state name")
         sidecar = self._agent_state_path(run_id, name)
         if not sidecar.exists():
-            shared = self.states_dir / "shared" / f"{name}.agent.json"
+            shared = self._shared_agent_state_path(name)
             if not shared.exists():
                 raise HTTPException(status_code=404, detail="agent state sidecar not found")
             sidecar = shared

@@ -114,49 +114,6 @@ UI renders this as a new trace category (extend `eventCategory` and `CATEGORY_IC
 
 **Files.** `env/trace.py`, `env/runtime.py`, `env/app.py`, `ui/src/App.tsx`.
 
-### 2.G — Consolidate safe-name validation **[Easy]**
-
-Three slightly different "safe name" checks exist today:
-- `env/trace.py:11` — `SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")` + `ensure_safe_name`.
-- `env/models.py:18-23` (`validate_run_id`) and `env/models.py:60-64` (`validate_name`) — `all(char.isalnum() or char in ('-', '_') ...)`.
-- `env/runtime.py:list_states delete_state` — its own inline check.
-
-Pull into a single helper (probably keep `env.trace.ensure_safe_name` as the canonical) and use everywhere. While there, harden `runtime.py:_state_path` and `load_state` with a `Path.resolve()` check that the resolved path is still inside `states_dir` (defense-in-depth against path traversal even if the name validator slips).
-
-**Verify.** `pytest` passes; the existing `test_delete_state_rejects_traversal` should still pass with the new check.
-
-**Files.** `env/trace.py`, `env/models.py`, `env/runtime.py`.
-
----
-
-## 3. Correctness / smaller fixes
-
-### 3.B — `dev.sh` bakes in a personal cache path **[Easy]**
-
-`scripts/dev.sh:18` hard-codes `UV_CACHE_DIR=/private/tmp/uv-cache`. Almost certainly a personal workaround. Change to: only set the env var if it isn't already set, or just drop it entirely.
-
-**Verify.** `bash scripts/dev.sh` still works on a fresh checkout.
-
-**Files.** `scripts/dev.sh`.
-
-### 3.C — Private-attr access in tests **[Easy]**
-
-The test suite does `harness._client = client  # type: ignore` (see `tests/test_harness_base.py:59`, `tests/test_my_agent.py` patterns). Indicates the public/private API isn't clean. Add a `client_factory: Callable[[str], PokemonEnvClient] | None = None` constructor argument to `PokemonAgent` (`harness/agent.py:24`); tests pass a lambda producing a fake client.
-
-**Verify.** `pytest` passes without any `# type: ignore` on `_client` assignment.
-
-**Files.** `harness/agent.py`, `tests/test_harness_base.py`, `tests/test_my_agent.py`.
-
-### 3.D — `harness/replay.py` re-presses already-emitted events **[Easy]**
-
-When replaying into a fresh run, the live env emits its own `button_press` events; you end up with a trace mixing original + replayed events. The cleanest fix: before each press in `harness/replay.py:replay_env_trace`, emit a harness event of type `replay_marker` with payload `{source_run_id, source_frame}`. UI can use this to mark replayed runs visually (or filter them out via the existing filter chips).
-
-**Verify.** Replay a known trace into a fresh run; new env trace shows interleaved `replay_marker` events identifying the source.
-
-**Files.** `harness/replay.py`.
-
----
-
 ## 4. DX / repo hygiene — Tier 3
 
 ### 4.A — Static analysis **[Medium]**
@@ -176,37 +133,9 @@ After today's changes the file is ~700 lines. Split into `ui/src/trace/` (TraceL
 
 **Files.** `ui/src/App.tsx` → multiple modules.
 
-### 4.C — Run/state cleanup policy **[Easy]**
-
-25+ run dirs on disk after a few days, none ever cleaned. Add `scripts/clean-runs.sh` that removes `runs/<id>/` and `states/<id>/` for any id whose `runs/<id>/` mtime is > 30 days old. Bonus: surface run sizes in the run picker dropdown so the user can see what's consuming disk (extend the `RunSummary` shape in `env/runtime.py:list_runs` to include `bytes`).
-
-**Verify.** `scripts/clean-runs.sh --dry-run` lists candidates; without `--dry-run` deletes them.
-
-**Files.** `scripts/clean-runs.sh` (new), optionally `ui/src/App.tsx`, `env/runtime.py`.
-
-### 4.D — Module-form invocations in docs **[Easy]**
-
-`harness/examples/my_agent.py` is invoked with `uv run python harness/examples/my_agent.py` (a path) but `python -m harness.examples.my_agent` would also work and matches `python -m harness.replay` already in the README. Just docs.
-
-**Files.** `README.md`.
-
-### 4.E — Smoke test wiring **[Easy]**
-
-`ui/pokemon-harness-smoke.spec.js` (referenced in `CHANGELOG.md`) lives in `ui/` not `tests/` or `ui/tests/`. With Playwright as a `devDependencies`, wire up `npm run test:smoke` (e.g. `playwright test pokemon-harness-smoke.spec.js`) and add it to `scripts/verify.sh` after the production build.
-
-**Files.** `ui/package.json`, `scripts/verify.sh`.
-
-### 4.F — Export client helpers from `harness/__init__.py` **[Easy]**
-
-`harness/__init__.py` exports `PokemonAgent` only. The `press()` / `wait()` helper builders in `harness/client.py:94-99` are useful for building `sequence()` payloads but aren't exported — `from harness import press` fails silently. Either export them (add to `__all__`) or delete them (they're undocumented). Prefer export, since `sequence()` payloads are the natural use case and the README's API table lists `sequence()` as a supported entry point.
-
-**Files.** `harness/__init__.py`, `README.md` if you add a usage note.
-
----
-
 ## Suggested order for what's left
 
 1. **1.E** (frame scrubber + rewind UI, Hard) — the user-facing complement to 1.C.2: visual scrub through past frames, one-click rewind to any prior checkpoint, all hooked into the now-working agent-history restore.
 2. **1.F** (LLM telemetry drawer, Medium) — independent, big perceived-quality win for observability.
 3. **2.C** (heartbeat/TTL/persistence, Medium) — papers over the documented stale-registration footgun.
-4. **2.E** / **2.G** / **3.x** / **4.x** — opportunistic, low risk.
+4. **2.E** (streaming / paginated trace reads), then **4.A** / **4.B** for static analysis and UI decomposition.

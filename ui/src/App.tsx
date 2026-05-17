@@ -172,6 +172,18 @@ function formatDelta(current: TraceEvent, previous: TraceEvent | null): string {
   return `+${(deltaMs / 1000).toFixed(1)} s`;
 }
 
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+}
+
 export function App() {
   const [runId, setRunId] = useState("manual-run");
   const [state, setState] = useState<PokemonState | null>(null);
@@ -536,7 +548,7 @@ export function App() {
                 .filter((entry) => !entry.active)
                 .map((entry) => (
                   <option key={entry.run_id} value={entry.run_id}>
-                    {entry.run_id} · {new Date(entry.modified_at).toLocaleString()}
+                    {entry.run_id} · {formatBytes(entry.bytes)} · {new Date(entry.modified_at).toLocaleString()}
                   </option>
                 ))}
             </select>

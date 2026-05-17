@@ -4,6 +4,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from env.trace import ensure_safe_name
+
 
 Button = Literal["A", "B", "START", "SELECT", "UP", "DOWN", "LEFT", "RIGHT"]
 SpeedMode = Literal["paused", "1x", "5x", "max"]
@@ -19,9 +21,7 @@ class StartRunRequest(BaseModel):
     def validate_run_id(cls, value: str | None) -> str | None:
         if value is None:
             return value
-        if not all(char.isalnum() or char in ("-", "_") for char in value):
-            raise ValueError("run_id may only contain letters, numbers, hyphen, and underscore")
-        return value
+        return ensure_safe_name(value, "run_id")
 
 
 class PressAction(BaseModel):
@@ -63,9 +63,7 @@ class SaveStateRequest(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, value: str) -> str:
-        if not all(char.isalnum() or char in ("-", "_") for char in value):
-            raise ValueError("state name may only contain letters, numbers, hyphen, and underscore")
-        return value
+        return ensure_safe_name(value, "state name")
 
 
 class HarnessEventRequest(BaseModel):

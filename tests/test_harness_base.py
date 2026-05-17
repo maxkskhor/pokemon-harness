@@ -59,9 +59,8 @@ class FakeClient:
 def test_harness_press_delegates_to_client_without_duplicate_event() -> None:
     # The env publishes the canonical `button_press` event; the harness must not also
     # emit its own duplicate `action` event for the same press.
-    harness = PokemonAgent()
     client = FakeClient()
-    harness._client = client  # type: ignore[assignment]
+    harness = PokemonAgent(client_factory=lambda _: client)
 
     harness.press("RIGHT", frames=8)
 
@@ -70,9 +69,8 @@ def test_harness_press_delegates_to_client_without_duplicate_event() -> None:
 
 
 def test_harness_public_helpers_delegate_to_client() -> None:
-    harness = PokemonAgent()
     client = FakeClient()
-    harness._client = client  # type: ignore[assignment]
+    harness = PokemonAgent(client_factory=lambda _: client)
 
     assert harness.wait(12) == {"frames": 12}
     assert harness.sequence([{"type": "wait", "frames": 3}]) == {"steps": [{"type": "wait", "frames": 3}]}
@@ -88,9 +86,11 @@ def test_harness_public_helpers_delegate_to_client() -> None:
 
 
 def test_save_state_serializes_history_when_subclass_opts_in() -> None:
+    client = FakeClient()
+
     class HistoryAgent(PokemonAgent):
         def __init__(self) -> None:
-            super().__init__()
+            super().__init__(client_factory=lambda _: client)
             self.h: list[str] = ["msg-1", "msg-2"]
 
         def serialize_history(self) -> dict[str, Any]:
@@ -100,18 +100,22 @@ def test_save_state_serializes_history_when_subclass_opts_in() -> None:
             self.h = list(data.get("history", []))
 
     harness = HistoryAgent()
-    client = FakeClient()
-    harness._client = client  # type: ignore[assignment]
-
     harness.save_state("ckpt-1")
 
     assert client.saved == [("ckpt-1", {"history": ["msg-1", "msg-2"]})]
 
 
 def test_load_state_restores_history_from_response() -> None:
+    class LoadingFakeClient(FakeClient):
+        def load_state(self, name: str) -> dict[str, Any]:
+            self.loaded.append(name)
+            return {"name": name, "agent_state": {"history": ["snap-1", "snap-2"]}}
+
+    client = LoadingFakeClient()
+
     class HistoryAgent(PokemonAgent):
         def __init__(self) -> None:
-            super().__init__()
+            super().__init__(client_factory=lambda _: client)
             self.h: list[str] = []
 
         def serialize_history(self) -> dict[str, Any]:
@@ -120,14 +124,7 @@ def test_load_state_restores_history_from_response() -> None:
         def restore_history(self, data: dict[str, Any]) -> None:
             self.h = list(data.get("history", []))
 
-    class LoadingFakeClient(FakeClient):
-        def load_state(self, name: str) -> dict[str, Any]:
-            self.loaded.append(name)
-            return {"name": name, "agent_state": {"history": ["snap-1", "snap-2"]}}
-
     harness = HistoryAgent()
-    client = LoadingFakeClient()
-    harness._client = client  # type: ignore[assignment]
 
     harness.load_state("ckpt-1")
 
@@ -137,9 +134,11 @@ def test_load_state_restores_history_from_response() -> None:
 
 
 def test_run_wrapped_emits_full_traceback_on_error(capsys: Any) -> None:
+    client = FakeClient()
+
     class BrokenPokemonAgent(PokemonAgent):
         def __init__(self) -> None:
-            super().__init__()
+            super().__init__(client_factory=lambda _: client)
             self.errors: list[str] = []
             self.statuses: list[str] = []
 
@@ -153,8 +152,6 @@ def test_run_wrapped_emits_full_traceback_on_error(capsys: Any) -> None:
             self.statuses.append(status)
 
     harness = BrokenPokemonAgent()
-    client = FakeClient()
-    harness._client = client  # type: ignore[assignment]
 
     harness._run_wrapped()
 
