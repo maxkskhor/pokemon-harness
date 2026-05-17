@@ -31,3 +31,4 @@ ui/vite.config.js
 ui/vite.config.d.ts
 ui/playwright.config.js
 ui/playwright.config.d.ts
+ui/test-results/
