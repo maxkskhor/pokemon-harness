@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import os
 import re
+import threading
 import time
 from typing import Any
 
@@ -96,20 +97,24 @@ class MyAgent(PokemonAgent):
             api_key=os.environ["OPENROUTER_API_KEY"],
         )
         self._history: list[dict[str, Any]] = []
+        # restore_history runs on the control-loop thread (WS-triggered rewinds);
+        # run() mutates _history on the run thread. Guard every access.
+        self._history_lock = threading.Lock()
 
     def serialize_history(self) -> dict:
-        # Snapshot the rolling LLM history so a checkpoint can rewind not just the
-        # emulator but also the model's view of "what already happened".
-        return {"history": list(self._history)}
+        with self._history_lock:
+            return {"history": list(self._history)}
 
     def restore_history(self, data: dict) -> None:
         history = data.get("history") if isinstance(data, dict) else None
         if isinstance(history, list):
-            self._history = list(history)
+            with self._history_lock:
+                self._history = list(history)
 
     def run(self) -> None:
         turn = 0
-        self._history = [{"role": "system", "content": SYSTEM_PROMPT}]
+        with self._history_lock:
+            self._history = [{"role": "system", "content": SYSTEM_PROMPT}]
 
         while not self.should_stop():
             turn += 1
@@ -126,12 +131,14 @@ class MyAgent(PokemonAgent):
                     {"type": "text", "text": USER_TURN_TEXT},
                 ],
             }
-            self._history.append(user_msg)
+            with self._history_lock:
+                self._history.append(user_msg)
+                messages_snapshot = list(self._history)
 
             started_at = time.perf_counter()
             response = self._llm.chat.completions.create(
                 model=MODEL,
-                messages=self._history,
+                messages=messages_snapshot,
             )
             latency_ms = int((time.perf_counter() - started_at) * 1000)
 
@@ -139,7 +146,7 @@ class MyAgent(PokemonAgent):
             reasoning = _extract_reasoning(response)
             self.emit("llm_call", {
                 "model": MODEL,
-                "messages": _strip_image_data(self._history),
+                "messages": _strip_image_data(messages_snapshot),
                 "response": raw,
                 "usage": {
                     **_usage_payload(response),
@@ -151,12 +158,11 @@ class MyAgent(PokemonAgent):
             clean_response = _strip_think_tags(raw)
             action = clean_response.upper().split()[0] if clean_response else ""
 
-            self._history.append({"role": "assistant", "content": raw})
-
-            # Keep rolling window: system msg + last N turn pairs
-            max_msgs = 1 + MAX_HISTORY_TURNS * 2
-            if len(self._history) > max_msgs:
-                self._history = [self._history[0]] + self._history[-(MAX_HISTORY_TURNS * 2):]
+            with self._history_lock:
+                self._history.append({"role": "assistant", "content": raw})
+                max_msgs = 1 + MAX_HISTORY_TURNS * 2
+                if len(self._history) > max_msgs:
+                    self._history = [self._history[0]] + self._history[-(MAX_HISTORY_TURNS * 2):]
 
             self.emit("decision", {
                 "turn": turn,

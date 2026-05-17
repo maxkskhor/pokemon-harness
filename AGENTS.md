@@ -9,6 +9,63 @@ The ultimate goal is an **optimal UI for observing gameplay and how the Pokemon 
 
 When proposing or making changes, weigh them against these two goals. A change that adds a feature but reduces inspectability or makes debugging harder is a regression. A change that makes a run easier to understand or replay is a win.
 
+## Coding principles for non-trivial tasks
+
+Apply these when tackling TODO items, new features, or refactors. They address the most common failure modes: wrong assumptions, overengineering, sprawling edits, and vague goals.
+
+### 1. Think Before Coding
+
+Don't assume. Don't hide confusion. Surface tradeoffs.
+
+- State assumptions explicitly — if uncertain, ask rather than guess
+- Present multiple interpretations — don't pick silently when ambiguity exists
+- Push back when warranted — if a simpler approach exists, say so
+- Stop when confused — name what's unclear and ask for clarification
+
+### 2. Simplicity First
+
+Minimum code that solves the problem. Nothing speculative.
+
+- No features beyond what was asked
+- No abstractions for single-use code
+- No "flexibility" or "configurability" that wasn't requested
+- No error handling for impossible scenarios
+- If 200 lines could be 50, rewrite it
+
+**Test:** Would a senior engineer say this is overcomplicated? If yes, simplify.
+
+### 3. Surgical Changes
+
+Touch only what you must. Clean up only your own mess.
+
+When editing existing code: don't "improve" adjacent code, comments, or formatting; don't refactor things that aren't broken; match existing style even if you'd do it differently; if you notice unrelated dead code, mention it — don't delete it.
+
+When your changes create orphans: remove imports/variables/functions that *your* changes made unused; don't remove pre-existing dead code unless asked.
+
+**Test:** Every changed line should trace directly to the user's request.
+
+### 4. Goal-Driven Execution
+
+Define success criteria. Loop until verified.
+
+Transform imperative tasks into verifiable goals:
+
+| Instead of… | Transform to… |
+|---|---|
+| "Add validation" | "Write tests for invalid inputs, then make them pass" |
+| "Fix the bug" | "Write a test that reproduces it, then make it pass" |
+| "Refactor X" | "Ensure tests pass before and after" |
+
+For multi-step tasks, state a brief plan:
+
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
+```
+
+Strong success criteria let the LLM loop independently. Weak criteria ("make it work") require constant clarification.
+
 ## Keeping the changelog
 
 After completing any meaningful work, append an entry to `CHANGELOG.md`. Group by date, use Added / Changed / Fixed / Removed sections. Be specific: name the file, what changed, and why if non-obvious.

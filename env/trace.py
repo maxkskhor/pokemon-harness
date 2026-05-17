@@ -13,6 +13,9 @@ SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def now_iso() -> str:
+    # Always UTC with a +00:00 offset so lexicographic comparison in
+    # TraceStore.read(since_timestamp=...) stays correct. If you ever emit
+    # timestamps elsewhere, route them through this helper.
     return datetime.now(timezone.utc).isoformat()
 
 
@@ -86,6 +89,8 @@ class TraceStore:
                 if not line.strip():
                     continue
                 event = json.loads(line)
+                # Lexicographic compare is safe because every timestamp on disk was
+                # produced by now_iso() — fixed-width UTC ISO 8601 with +00:00.
                 if since_timestamp is not None and str(event.get("timestamp", "")) <= since_timestamp:
                     continue
                 events.append(event)

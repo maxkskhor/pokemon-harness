@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-05-17 (post-review followups)
+
+### Fixed
+- `scripts/verify.sh` — removed the leftover hard-coded `UV_CACHE_DIR=/private/tmp/uv-cache` prefix that the 2026-05-17 correctness pass missed when it cleaned up `scripts/dev.sh`.
+- `harness/examples/my_agent.py` — guard `self._history` with a `threading.Lock` so `restore_history` (control-loop thread, WS-triggered) cannot interleave with `run()`'s appends/rolling-window resize on the run thread. Snapshot the history before each LLM call so an in-flight `chat.completions` request can't trip over a concurrent rewind either.
+
+### Changed
+- `harness/agent.py` — comment the implicit `self._run_id` ↔ env `session.run_id` coupling that makes the WS-load sidecar lookup correct, so it stays load-bearing if anyone ever decouples them.
+- `env/trace.py` — annotate `now_iso()` and the `since_timestamp` compare in `TraceStore.read()` to spell out that lexicographic ordering is only safe because every timestamp on disk comes from `now_iso()` (fixed-width UTC ISO 8601 with `+00:00`).
+- `env/app.py` — note in the control WS loop that the 50 ms `asyncio.sleep` is a deliberate choice; switching to a per-harness `asyncio.Event` signalled from `enqueue()` is the eventual upgrade path but isn't worth the cross-thread plumbing yet.
+
 ## 2026-05-17 (TODO completion sweep)
 
 ### Added

@@ -270,6 +270,8 @@ def create_app(
                     continue
                 # Nothing to send — re-check that the harness is still registered, then
                 # yield. 50 ms keeps the loop cheap (no client traffic) and snappy.
+                # A per-harness asyncio.Event signalled from enqueue() would drop push
+                # latency to ~0 ms but requires cross-thread plumbing; not worth it yet.
                 if not harness_registry.has(harness_id):
                     break
                 now = asyncio.get_event_loop().time()

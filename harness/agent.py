@@ -308,6 +308,9 @@ class PokemonAgent:
                 name = cmd[len("load_state:"):]
                 if self._is_local_load_echo(name):
                     continue  # we already restored from our own load_state call
+                # Sidecar lookup uses self._run_id because start_run(self._run_id) above
+                # makes the env's session.run_id equal to the agent's run_id; if a future
+                # change decouples them, this read must use the env's run_id instead.
                 try:
                     sidecar = self._client.read_agent_state(self._run_id, name)
                 except Exception as exc:
