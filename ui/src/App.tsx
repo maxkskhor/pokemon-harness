@@ -350,7 +350,7 @@ export function App() {
             <div className="run-controls">
               <input value={runId} onChange={(e) => setRunId(e.target.value)} aria-label="Run id" />
               <button onClick={handleStart} disabled={busy}>
-                <Play size={14} /> Start run
+                <Play size={14} /> {state ? "Reset run" : "Start run"}
               </button>
               <button onClick={handleStop} disabled={busy || !state}>
                 <Square size={14} /> Stop run

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-05-17 (agent play resume)
+
+### Changed
+- `harness/agent.py` — agent Play now resumes an active emulator run instead of always creating a fresh run and reloading the configured starting save state.
+- `ui/src/App.tsx` — the emulator start control now reads `Reset run` while a run is active, making the explicit restart path clearer.
+
+### Added
+- `tests/test_harness_base.py` — regression coverage for agent Play resuming an active run and only starting/loading the initial state when no emulator run exists.
+
 ## 2026-05-17 (LLM client retry layer)
 
 ### Added

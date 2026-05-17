@@ -17,9 +17,19 @@ class FakeClient:
         self.sequences: list[list[dict[str, Any]]] = []
         self.saved: list[str] = []
         self.loaded: list[str] = []
+        self.started: list[str] = []
+        self.speeds: list[str] = []
 
     def get_state(self) -> dict[str, Any]:
         return self.states.pop(0)
+
+    def start_run(self, run_id: str) -> dict[str, Any]:
+        self.started.append(run_id)
+        return {"run_id": run_id}
+
+    def set_speed(self, mode: str) -> dict[str, Any]:
+        self.speeds.append(mode)
+        return {"speed_mode": mode}
 
     def press_button(self, button: str, frames: int) -> None:
         self.pressed.append((button, frames))
@@ -83,6 +93,37 @@ def test_harness_public_helpers_delegate_to_client() -> None:
     assert client.sequences == [[{"type": "wait", "frames": 3}]]
     assert client.saved == [("checkpoint", None)]
     assert client.loaded == ["checkpoint"]
+
+
+def test_prepare_run_for_play_resumes_active_run_without_resetting() -> None:
+    client = FakeClient()
+    client.states = [{"run_id": "active-run", "frame": 42}]
+    harness = PokemonAgent(client_factory=lambda _: client, run_id="agent")
+
+    harness._prepare_run_for_play()
+
+    assert harness._run_id == "active-run"
+    assert client.started == []
+    assert client.loaded == []
+    assert client.events[-1]["type"] == "lifecycle"
+    assert client.events[-1]["payload"] == {"status": "run_resumed", "run_id": "active-run", "frame": 42}
+
+
+def test_prepare_run_for_play_starts_new_run_when_no_run_is_active() -> None:
+    class NoActiveRunClient(FakeClient):
+        def get_state(self) -> dict[str, Any]:
+            raise RuntimeError("No active run")
+
+    client = NoActiveRunClient()
+    harness = PokemonAgent(client_factory=lambda _: client, run_id="agent", load_state="bedroom")
+
+    harness._prepare_run_for_play()
+
+    assert len(client.started) == 1
+    assert client.started[0].startswith("agent-")
+    assert client.loaded == ["bedroom"]
+    lifecycle_statuses = [event["payload"]["status"] for event in client.events if event["type"] == "lifecycle"]
+    assert lifecycle_statuses == ["run_started", "state_loaded"]
 
 
 def test_save_state_serializes_history_when_subclass_opts_in() -> None:

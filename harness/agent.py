@@ -274,22 +274,11 @@ class PokemonAgent:
             if cmd == "play" and (run_thread is None or not run_thread.is_alive()):
                 self._stop_event.clear()
                 self._set_status("starting")
-                self._run_id = self._new_run_id()
                 try:
-                    self._client.start_run(self._run_id)
+                    self._prepare_run_for_play()
                 except Exception as exc:
-                    self._set_error(f"start_run failed: {exc}")
+                    self._set_error(f"prepare run failed: {exc}")
                     continue
-                self._emit_safe("lifecycle", {"status": "run_started", "run_id": self._run_id})
-                if self._load_state:
-                    try:
-                        self._client.load_state(self._load_state)
-                        self._emit_safe("lifecycle", {"status": "state_loaded", "name": self._load_state})
-                    except Exception as exc:
-                        self._emit_safe(
-                            "warning",
-                            {"message": f"Could not load save state '{self._load_state}': {exc}. Starting from ROM beginning."},
-                        )
                 self._client.set_speed("1x")
                 self._set_status("running")
                 run_thread = threading.Thread(target=self._run_wrapped, daemon=True)
@@ -318,6 +307,36 @@ class PokemonAgent:
                     continue
                 if sidecar:
                     self._apply_agent_state(name, sidecar, source="ws")
+
+    def _prepare_run_for_play(self) -> None:
+        try:
+            state = self._client.get_state()
+        except Exception:
+            self._run_id = self._new_run_id()
+            self._client.start_run(self._run_id)
+            self._emit_safe("lifecycle", {"status": "run_started", "run_id": self._run_id})
+            if self._load_state:
+                try:
+                    self._client.load_state(self._load_state)
+                    self._emit_safe("lifecycle", {"status": "state_loaded", "name": self._load_state})
+                except Exception as exc:
+                    self._emit_safe(
+                        "warning",
+                        {"message": f"Could not load save state '{self._load_state}': {exc}. Starting from ROM beginning."},
+                    )
+            return
+
+        active_run_id = state.get("run_id")
+        if isinstance(active_run_id, str) and active_run_id:
+            self._run_id = active_run_id
+        self._emit_safe(
+            "lifecycle",
+            {
+                "status": "run_resumed",
+                "run_id": self._run_id,
+                "frame": state.get("frame"),
+            },
+        )
 
     def _run_wrapped(self) -> None:
         try:
