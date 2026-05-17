@@ -59,11 +59,17 @@ class PokemonEnvClient:
     def set_speed(self, mode: str) -> dict[str, Any]:
         return self._post("/api/speed", {"mode": mode})
 
-    def save_state(self, name: str) -> dict[str, Any]:
-        return self._post("/api/save-state", {"name": name})
+    def save_state(self, name: str, agent_state: dict[str, Any] | None = None) -> dict[str, Any]:
+        body: dict[str, Any] = {"name": name}
+        if agent_state is not None:
+            body["agent_state"] = agent_state
+        return self._post("/api/save-state", body)
 
     def load_state(self, name: str) -> dict[str, Any]:
         return self._post("/api/load-state", {"name": name})
+
+    def read_agent_state(self, run_id: str, name: str) -> dict[str, Any]:
+        return self._get(f"/api/runs/{run_id}/states/{name}/agent")
 
     def emit(
         self,

@@ -1,5 +1,77 @@
 # Changelog
 
+## 2026-05-17 (agent-history-aware checkpoints — true rewind)
+
+### Added
+- `harness/agent.py` — `PokemonAgent.serialize_history() -> dict` and `restore_history(data: dict)` hooks. Default to `{}` / no-op so existing subclasses keep working unchanged. `PokemonAgent.save_state(name)` now calls `serialize_history` and ships the result as `agent_state`; `PokemonAgent.load_state(name)` reads the sidecar from the response and applies it synchronously. UI-initiated loads fan out via the control WS (`load_state:<name>` command); the agent fetches the sidecar via `GET /api/runs/<id>/states/<name>/agent` and calls `restore_history` automatically. Echo dedup via `_last_local_load` (5 s window) keeps the agent from restoring twice when it triggered the load itself.
+- `harness/examples/my_agent.py` — overrides `serialize_history` / `restore_history` to round-trip `self._history`, so a UI Load now rewinds the LLM message window along with the emulator.
+- `env/models.py` — optional `agent_state: dict | None` field on `SaveStateRequest`.
+- `env/runtime.py` — `RuntimeManager.save_state` writes `<name>.agent.json` next to `<name>.state` when `agent_state` is supplied. `load_state` reads the sidecar (or its shared-states counterpart), returns it in the response and includes it in the `state_loaded` event payload. New `read_agent_state(run_id, name)` helper for the GET endpoint.
+- `env/app.py` — `GET /api/runs/<run_id>/states/<name>/agent` serves the JSON sidecar. The `/api/load-state` route, after the env load completes, enqueues `load_state:<name>` for every running harness so each agent can restore its own history through the control WS.
+- `tests/test_harness_base.py` — coverage for `serialize_history` round-trip and history restoration from a load_state response.
+- `tests/test_api.py` — coverage for the sidecar write/read round-trip, null sidecar on plain saves, and the registry fanout on UI-initiated load.
+
+## 2026-05-17 (websocket control loop + registry extraction)
+
+### Added
+- `env/harness_registry.py` — `HarnessRegistry` lifted out of `env/app.py`. Same shape, plus a small `has(harness_id) -> bool` helper. `env/app.py` re-imports it (callers `from env.app import HarnessRegistry` keep working).
+- `env/app.py` — new `WS /api/harness/{harness_id}/control` endpoint. On connect, the WS drains queued commands and then pushes new ones as they're enqueued via the existing `/play` / `/stop` HTTP routes. Server-side polls the FIFO queue every 50 ms (cheap, no client traffic). Closes with code 4404 for unknown harness ids.
+- `harness/agent.py` — `PokemonAgent.serve()` starts a daemon thread (`_ws_loop`) that holds the control WebSocket open and pushes commands onto an in-process queue (`_cmd_queue`). The control loop now blocks on `_cmd_queue.get(timeout=1.0)` instead of polling HTTP. If the WS endpoint isn't supported (404 from older backends), the agent falls back to the previous HTTP poll loop automatically.
+- `tests/test_api.py` — three new tests for the control WS (drain-on-connect FIFO ordering, push-after-connect, 4404 close for unknown id).
+
+### Changed
+- `tests/test_api.py` — `HarnessRegistry` import now comes from `env.harness_registry` directly instead of via `env.app`.
+- Removes the `GET /api/harness/<id>/poll 200 OK` log spam that filled every dev session, and drops Stop-button latency from ~500 ms (worst-case poll interval) to ~5 ms WS dispatch + whatever the agent's own loop slack is.
+
+## 2026-05-17 (run picker + history browser)
+
+### Added
+- `env/runtime.py` and `env/app.py` — `GET /api/runs` returning all on-disk runs `[{run_id, modified_at, has_env, has_harness, active}]`, newest first.
+- `ui/src/App.tsx`, `ui/src/api.ts`, `ui/src/styles.css` — "View run" dropdown in the trace pane header. Default is the live run; selecting a past run-id loads its env + harness traces from disk and shows them read-only (the dropdown also marks the count line with `viewing <run_id>`). Live WS events continue to drive checkpoint refresh + the active game screen, but are not appended to the trace list while a past run is being inspected.
+- `tests/test_api.py` — two new tests for `/api/runs` (active flag, newest-first ordering).
+
+## 2026-05-17 (checkpoint UI + dedup action/button_press)
+
+### Added
+- `env/runtime.py` and `env/app.py` — `GET /api/runs/{run_id}/states`, `GET /api/states/shared`, and `DELETE /api/runs/{run_id}/states/{name}` for listing and removing save states. Run-local listings include the `frame` each state was captured at (read from the env trace).
+- `ui/src/App.tsx`, `ui/src/api.ts`, `ui/src/styles.css` — Checkpoints panel below the state grid: lists run-local checkpoints (with Load + delete) and shared checkpoints (Load only), one-click Save with auto-named `chkpt-<frame>` default, optional custom name. The panel auto-refreshes on `state_saved` / `state_loaded` WebSocket events.
+- `tests/test_api.py` — five new tests for the state listing endpoints (frame enrichment, newest-first ordering, shared listing, delete, path-traversal rejection).
+
+### Changed
+- `env/runtime.py` — `button_press` and `button_sequence` env payloads now include `before` and `after` position snapshots `{frame, map_id, x, y}`. The harness no longer needs to emit its own `action` event; one ground-truth env event per press is the new contract.
+- `harness/agent.py` — `PokemonAgent.press()` no longer round-trips state twice and emits a duplicate `action` event; it just delegates to the client. Saves two HTTP calls per agent press.
+- `ui/src/App.tsx` — `button_press` and `button_sequence` summaries now render the position diff (`map 38 (3,6) → map 38 (3,7)`); the legacy `action` formatter is kept as a fallback for older traces.
+- `ui/src/App.tsx` — removed the manual save-state form (input + Save + Load); its functionality is now covered by the Checkpoints panel.
+
+### Removed
+- `harness/agent.py` — `_safe_state` and `_position_payload` helpers (only used by the old duplicate action emit, now obsolete).
+
+## 2026-05-17 (per-turn screenshots)
+
+### Added
+- `env/runtime.py` and `env/app.py` — per-frame thumbnails persisted to `runs/<run_id>/frames/<frame>.png` whenever an event is appended to the trace; served via `GET /api/runs/<run_id>/frames/<frame>.png`. Disk usage is bounded by dedup-by-frame: multiple events at the same emulator frame share one PNG.
+- `env/runtime.py` — `Session.cached_screen_png()` caches the PNG bytes alongside the SHA-256, so thumbnail saves, the live `/api/screenshot.png` endpoint, and `state_payload()`'s screen hash all share a single render per frame (closes review item 2.F).
+- `ui/src/App.tsx` and `ui/src/styles.css` — every trace event with a `frame` value renders a small pixel-perfect game thumbnail under its summary; click to toggle between 128px and 256px sizes. This is the missing link between an agent decision and what the agent actually saw.
+- `ui/src/api.ts` — `frameThumbnailUrl(runId, frame)` helper.
+- `tests/test_api.py` — coverage for the thumbnail endpoint (200 path, 404 path, dedup-by-frame, reset-run clears the frames directory).
+
+### Changed
+- `env/trace.py` — `TraceStore.reset_run` now also removes the `frames/` directory for the run, keeping run resets clean.
+
+## 2026-05-17 (unified trace view)
+
+### Added
+- `AGENTS.md` — "Project north star" section at the top: optimal UI for observing agent gameplay + debuggability/tracing/checkpoint/rollback as the framing for all future work.
+- `TODO.md` — codebase review plan (Tier-1 UI gaps, Tier-2 cross-cutting, Tier-3 hygiene) with detailed suggested actions.
+- `ui/src/App.tsx` — env events (button_press, button_sequence, step, state_saved, state_loaded, speed_changed, run_started, run_stopped) are now rendered alongside harness events in the right pane; previously they were silently dropped, leaving no UI window onto ground-truth env actions.
+- `ui/src/App.tsx` — `eventCategory()` helper classifies events into six filterable categories: decision, action, state, lifecycle, warning, error.
+- `ui/src/App.tsx` and `ui/src/styles.css` — per-row "env" / "agent" source badge and color tones for the new `state` and `error` categories.
+- `ui/src/App.tsx` — `refreshTraces` now fetches both env and harness traces from disk and merges them by timestamp (Reload button + initial restore).
+
+### Changed
+- `ui/src/App.tsx` — `harnessEvents` state renamed to `events`; trace pane header renamed from "Agent" to "Trace"; ring buffer bumped from 200 to 500 events so faster runs do not truncate the timeline.
+- `ui/src/App.tsx` — `playback_frame` events still bump the image version but are skipped from the timeline list (they were already excluded before; now the rule is centralised in `NOISY_EVENT_TYPES`).
+
 ## 2026-05-17 (docs gardening)
 
 ### Added

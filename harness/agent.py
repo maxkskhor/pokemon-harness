@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import json
+import logging
 import threading
 import time
 import traceback
 import uuid
 import sys
 from pathlib import Path
+from queue import Empty, Queue
 from typing import Any
 
 from harness.client import PokemonEnvClient
+
+logger = logging.getLogger("pokemon_harness.agent")
 
 
 class PokemonAgent:
@@ -33,7 +38,14 @@ class PokemonAgent:
         self._load_state = load_state
         self._client = PokemonEnvClient(base_url)
         self._stop_event = threading.Event()
+        self._shutdown_event = threading.Event()
+        self._cmd_queue: Queue[str] = Queue()
+        self._ws_thread: threading.Thread | None = None
         self._harness_id: str | None = None
+        # When the agent itself calls load_state, the env also pushes a
+        # load_state:<name> command back via the control WS. Track the most recent
+        # local restore so we ignore that echo (dedup window: 5 s).
+        self._last_local_load: tuple[str, float] | None = None
 
     # ── public API your run() calls ───────────────────────────────────
 
@@ -60,28 +72,36 @@ class PokemonAgent:
         return self._client.press_sequence(steps)
 
     def press(self, button: str, frames: int = 8) -> None:
-        """Press a GameBoy button."""
-        before = self._safe_state()
+        """Press a GameBoy button.
+
+        The env publishes the canonical `button_press` trace event (with frame deltas,
+        screen hash, and before/after position) — the agent does not need to emit a
+        duplicate event of its own.
+        """
         self._client.press_button(button, frames)
-        after = self._safe_state()
-        self.emit(
-            "action",
-            {
-                "kind": "button_press",
-                "button": button,
-                "frames": frames,
-                "before": self._position_payload(before),
-                "after": self._position_payload(after),
-            },
-        )
 
     def save_state(self, name: str) -> dict[str, Any]:
-        """Save the current emulator state under a run-local name."""
-        return self._client.save_state(name)
+        """Save the current emulator state under a run-local name.
+
+        Also serializes the agent's own context (via `serialize_history()`) and stores
+        it as a `<name>.agent.json` sidecar so a subsequent rewind can reset the LLM
+        message history along with the emulator.
+        """
+        agent_state = self.serialize_history()
+        return self._client.save_state(name, agent_state=agent_state or None)
 
     def load_state(self, name: str) -> dict[str, Any]:
-        """Load a run-local or shared emulator state by name."""
-        return self._client.load_state(name)
+        """Load a run-local or shared emulator state by name.
+
+        Restores agent-side history synchronously (via `restore_history()`) from any
+        sidecar included in the response, and records the load so the WebSocket-pushed
+        echo (when the UI initiated this load) is dropped instead of restoring twice.
+        """
+        response = self._client.load_state(name)
+        sidecar = response.get("agent_state") if isinstance(response, dict) else None
+        if sidecar:
+            self._apply_agent_state(name, sidecar)
+        return response
 
     def emit(
         self,
@@ -96,6 +116,26 @@ class PokemonAgent:
     def should_stop(self) -> bool:
         """Return True if the UI sent a Stop signal — check this in your loop."""
         return self._stop_event.is_set()
+
+    # ── override these to make checkpoints carry agent context ───────
+
+    def serialize_history(self) -> dict[str, Any]:
+        """Return a JSON-serializable snapshot of the agent's own state.
+
+        Default: empty dict. Override in subclasses to persist LLM message history,
+        a running goal, planning scratchpad, etc. Whatever this returns is round-tripped
+        verbatim into `restore_history()` when a checkpoint is reloaded.
+        """
+        return {}
+
+    def restore_history(self, data: dict[str, Any]) -> None:
+        """Restore agent state from a checkpoint sidecar.
+
+        Default: no-op. Override in subclasses to apply whatever `serialize_history()`
+        produced. Called from the control-loop thread, so use locks if your `run()` may
+        be reading the same fields concurrently.
+        """
+        return None
 
     # ── override this ─────────────────────────────────────────────────
 
@@ -122,11 +162,18 @@ class PokemonAgent:
         print(f"Registered '{self.name}' (id={self._harness_id})")
         print("Open the UI, select this agent from the dropdown, and click Play.")
 
+        # Start a daemon thread that holds a WebSocket open to the backend and pushes
+        # commands ({"command": "play" | "stop" | ...}) onto self._cmd_queue.
+        # Falls back to HTTP polling if the WS endpoint is unavailable (older backend).
+        self._ws_thread = threading.Thread(target=self._ws_loop, daemon=True)
+        self._ws_thread.start()
+
         try:
             self._control_loop()
         except KeyboardInterrupt:
             pass
         finally:
+            self._shutdown_event.set()
             if self._harness_id:
                 try:
                     self._client._post(f"/api/harness/{self._harness_id}/unregister", {})
@@ -137,14 +184,87 @@ class PokemonAgent:
 
     # ── internals ─────────────────────────────────────────────────────
 
-    def _control_loop(self) -> None:
-        run_thread: threading.Thread | None = None
-        while True:
+    def _ws_loop(self) -> None:
+        """Holds a long-lived WebSocket to the backend and pushes commands onto _cmd_queue.
+
+        On disconnect, reconnects with exponential backoff. If the backend doesn't
+        support the WS endpoint at all (404), falls back to HTTP polling — slower
+        but functionally identical, so older backends keep working.
+        """
+        ws_base = self._base_url
+        if ws_base.startswith("https://"):
+            ws_base = "wss://" + ws_base[len("https://"):]
+        elif ws_base.startswith("http://"):
+            ws_base = "ws://" + ws_base[len("http://"):]
+        url = f"{ws_base.rstrip('/')}/api/harness/{self._harness_id}/control"
+
+        backoff = 0.5
+        fallback_to_poll = False
+
+        try:
+            from websockets.sync.client import connect as ws_connect
+            from websockets.exceptions import ConnectionClosed, InvalidStatus
+        except ImportError:
+            logger.warning("websockets library not available; falling back to HTTP poll")
+            self._http_poll_loop()
+            return
+
+        while not self._shutdown_event.is_set():
+            try:
+                with ws_connect(url, open_timeout=5, close_timeout=2) as ws:
+                    backoff = 0.5
+                    fallback_to_poll = False
+                    while not self._shutdown_event.is_set():
+                        try:
+                            message = ws.recv(timeout=1.0)
+                        except TimeoutError:
+                            continue
+                        try:
+                            data = json.loads(message)
+                        except json.JSONDecodeError:
+                            logger.warning("malformed control message: %r", message)
+                            continue
+                        cmd = data.get("command")
+                        if cmd:
+                            self._cmd_queue.put(cmd)
+            except ConnectionClosed:
+                if self._shutdown_event.is_set():
+                    return
+            except InvalidStatus as exc:
+                # 404 = backend doesn't support the WS endpoint yet → fall back.
+                if not fallback_to_poll and getattr(exc.response, "status_code", None) == 404:
+                    logger.info("control WS not supported by backend; falling back to HTTP poll")
+                    fallback_to_poll = True
+                    self._http_poll_loop()
+                    return
+                logger.warning("control WS rejected: %s", exc)
+            except Exception as exc:  # pragma: no cover — network errors are flaky
+                logger.warning("control WS error: %s", exc)
+            if self._shutdown_event.is_set():
+                return
+            time.sleep(min(backoff, 5.0))
+            backoff = min(backoff * 2, 5.0)
+
+    def _http_poll_loop(self) -> None:
+        """Compatibility fallback that polls the legacy /poll endpoint at 500 ms."""
+        while not self._shutdown_event.is_set():
             try:
                 resp = self._client._get(f"/api/harness/{self._harness_id}/poll")
                 cmd = resp.get("command")
             except Exception:
                 time.sleep(1)
+                continue
+            if cmd:
+                self._cmd_queue.put(cmd)
+            time.sleep(0.5)
+
+    def _control_loop(self) -> None:
+        run_thread: threading.Thread | None = None
+        while not self._shutdown_event.is_set():
+            try:
+                # Block up to 1 s so KeyboardInterrupt is responsive even when idle.
+                cmd = self._cmd_queue.get(timeout=1.0)
+            except Empty:
                 continue
 
             if cmd == "play" and (run_thread is None or not run_thread.is_alive()):
@@ -180,7 +300,17 @@ class PokemonAgent:
                 self._set_status("idle")
                 self._emit_safe("lifecycle", {"status": "idle"})
 
-            time.sleep(0.5)
+            elif cmd.startswith("load_state:"):
+                name = cmd[len("load_state:"):]
+                if self._is_local_load_echo(name):
+                    continue  # we already restored from our own load_state call
+                try:
+                    sidecar = self._client.read_agent_state(self._run_id, name)
+                except Exception as exc:
+                    self._emit_safe("warning", {"message": f"load_state:{name} sidecar fetch failed: {exc}"})
+                    continue
+                if sidecar:
+                    self._apply_agent_state(name, sidecar, source="ws")
 
     def _run_wrapped(self) -> None:
         try:
@@ -207,25 +337,6 @@ class PokemonAgent:
         except Exception as exc:
             print(f"Could not emit event '{event_type}': {exc}")
 
-    def _safe_state(self) -> dict[str, Any] | None:
-        try:
-            return self.state()
-        except Exception:
-            return None
-
-    def _position_payload(self, state: dict[str, Any] | None) -> dict[str, Any] | None:
-        if state is None:
-            return None
-        pokemon = state.get("pokemon", {})
-        if not isinstance(pokemon, dict):
-            return None
-        return {
-            "frame": state.get("frame"),
-            "map_id": pokemon.get("map_id"),
-            "x": pokemon.get("x"),
-            "y": pokemon.get("y"),
-        }
-
     def _set_status(self, status: str) -> None:
         try:
             self._client._post(f"/api/harness/{self._harness_id}/status", {"status": status})
@@ -241,3 +352,23 @@ class PokemonAgent:
 
     def _new_run_id(self) -> str:
         return f"{self._run_id_prefix}-{uuid.uuid4().hex[:8]}"
+
+    def _apply_agent_state(self, name: str, sidecar: dict[str, Any], source: str = "local") -> None:
+        try:
+            self.restore_history(sidecar)
+        except Exception as exc:
+            full_tb = traceback.format_exc()
+            self._emit_safe("error", {"message": f"restore_history failed: {exc}", "traceback": full_tb})
+            return
+        self._last_local_load = (name, time.monotonic())
+        self._emit_safe(
+            "lifecycle",
+            {"status": "history_restored", "name": name, "source": source},
+        )
+
+    def _is_local_load_echo(self, name: str) -> bool:
+        last = self._last_local_load
+        if last is None:
+            return False
+        last_name, last_at = last
+        return last_name == name and (time.monotonic() - last_at) < 5.0

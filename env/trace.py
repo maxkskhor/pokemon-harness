@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -40,6 +41,9 @@ class TraceStore:
             path = self.trace_path(run_id, source)  # type: ignore[arg-type]
             if path.exists():
                 path.unlink()
+        frames_dir = self.run_dir(run_id) / "frames"
+        if frames_dir.exists():
+            shutil.rmtree(frames_dir)
 
     def append(
         self,

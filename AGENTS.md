@@ -1,5 +1,14 @@
 # AGENTS.md — Non-obvious knowledge for AI agents working on this repo
 
+## Project north star
+
+The ultimate goal is an **optimal UI for observing gameplay and how the Pokemon agent is playing the game** with whatever LLM agent/harness the user chooses. Two pillars:
+
+1. **Observability of the agent.** Show enough detail that a human can follow *what the agent saw, what it decided, and why* on every turn. The UI should be expandable — surface a useful summary by default, allow drilling into the raw payload, prompt, tool calls, screenshot, and reasoning when needed.
+2. **Debuggability of the run.** Tracing, structured logging, save states, checkpointing, and rollback are first-class concerns — not afterthoughts. The user should be able to pause, inspect, rewind, branch, and resume a run from any point.
+
+When proposing or making changes, weigh them against these two goals. A change that adds a feature but reduces inspectability or makes debugging harder is a regression. A change that makes a run easier to understand or replay is a win.
+
 ## Keeping the changelog
 
 After completing any meaningful work, append an entry to `CHANGELOG.md`. Group by date, use Added / Changed / Fixed / Removed sections. Be specific: name the file, what changed, and why if non-obvious.

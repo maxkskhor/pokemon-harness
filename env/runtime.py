@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -27,6 +28,28 @@ from env.trace import TraceStore, now_iso
 
 EmulatorFactory = Callable[[Path, Path | None], Emulator]
 logger = logging.getLogger("pokemon_harness.runtime")
+
+
+def _list_state_files(directory: Path, frames_by_name: dict[str, int]) -> list[dict[str, Any]]:
+    if not directory.exists():
+        return []
+    out: list[dict[str, Any]] = []
+    for path in sorted(directory.iterdir()):
+        if path.suffix != ".state" or not path.is_file():
+            continue
+        stat = path.stat()
+        entry: dict[str, Any] = {
+            "name": path.stem,
+            "size": stat.st_size,
+            "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+        }
+        frame = frames_by_name.get(path.stem)
+        if frame is not None:
+            entry["frame"] = frame
+        out.append(entry)
+    # Newest first — most useful for "rewind to the last checkpoint".
+    out.sort(key=lambda entry: entry["modified_at"], reverse=True)
+    return out
 
 
 class EventBroker:
@@ -70,6 +93,7 @@ class Session:
         self.lock = asyncio.Lock()
         self._screen_hash_frame: int | None = None
         self._screen_hash_value: str | None = None
+        self._screen_png_bytes: bytes | None = None
         self.rom_metadata = {
             "path": str(self.rom_path),
             "filename": self.rom_path.name,
@@ -88,6 +112,7 @@ class Session:
                 payload=payload,
                 frame=self.emulator.frame,
             )
+            self._save_frame_thumbnail(event["frame"])
         else:
             event = {
                 "run_id": self.run_id,
@@ -113,6 +138,7 @@ class Session:
             frame=frame,
             turn_id=event.turn_id,
         )
+        self._save_frame_thumbnail(envelope["frame"])
         await self.broker.publish(envelope)
         logger.info(
             "harness event run_id=%s type=%s turn_id=%s frame=%s payload=%s",
@@ -123,6 +149,27 @@ class Session:
             event.payload,
         )
         return envelope
+
+    def _save_frame_thumbnail(self, frame: int | None) -> None:
+        """Persist a PNG for `frame` if one is not already on disk.
+
+        Dedup-by-frame keeps disk usage proportional to unique game states, not
+        to event volume. Synchronous because PyBoy's screenshot is cheap and
+        keeping it on the same coroutine guarantees the recorded frame and the
+        captured pixels stay in sync.
+        """
+        if frame is None:
+            return
+        target = self.trace_store.run_dir(self.run_id) / "frames" / f"{frame}.png"
+        if target.exists():
+            return
+        try:
+            png = self.cached_screen_png()
+        except Exception:
+            logger.exception("frame thumbnail render failed run_id=%s frame=%s", self.run_id, frame)
+            return
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(png)
 
     def state_payload(self) -> dict[str, Any]:
         pokemon = read_pokemon_labels(self.symbols, self.emulator.read_memory_byte)
@@ -141,17 +188,40 @@ class Session:
             "pokemon": pokemon,
         }
 
+    def position_snapshot(self) -> dict[str, Any]:
+        """Cheap pokemon-label read used to annotate env action events with position diffs.
+
+        Doesn't render a screenshot (unlike state_payload), so it's safe to call before
+        a press completes.
+        """
+        pokemon = read_pokemon_labels(self.symbols, self.emulator.read_memory_byte)
+        return {
+            "frame": self.emulator.frame,
+            "map_id": pokemon.get("map_id"),
+            "x": pokemon.get("x"),
+            "y": pokemon.get("y"),
+        }
+
     def invalidate_screen_cache(self) -> None:
         self._screen_hash_frame = None
         self._screen_hash_value = None
+        self._screen_png_bytes = None
+
+    def cached_screen_png(self) -> bytes:
+        if self._screen_hash_frame == self.emulator.frame and self._screen_png_bytes is not None:
+            return self._screen_png_bytes
+        png = self.emulator.screenshot_png()
+        self._screen_hash_frame = self.emulator.frame
+        self._screen_png_bytes = png
+        self._screen_hash_value = png_sha256(png)
+        return png
 
     def screen_sha256(self) -> str:
         if self._screen_hash_frame == self.emulator.frame and self._screen_hash_value is not None:
             return self._screen_hash_value
-        digest = png_sha256(self.emulator.screenshot_png())
-        self._screen_hash_frame = self.emulator.frame
-        self._screen_hash_value = digest
-        return digest
+        self.cached_screen_png()
+        assert self._screen_hash_value is not None
+        return self._screen_hash_value
 
 
 class RuntimeManager:
@@ -220,7 +290,7 @@ class RuntimeManager:
     async def screenshot_png(self) -> bytes:
         session = self._require_session()
         async with session.lock:
-            return session.emulator.screenshot_png()
+            return session.cached_screen_png()
 
     async def step(self, request: StepRequest) -> dict[str, Any]:
         session = self._require_session()
@@ -235,17 +305,20 @@ class RuntimeManager:
     async def press(self, request: PressAction) -> dict[str, Any]:
         session = self._require_session()
         async with session.lock:
-            before = session.emulator.frame
+            before = session.position_snapshot()
             session.emulator.press(request.button, request.frames)
             session.invalidate_screen_cache()
             state = session.state_payload()
+            after = session.position_snapshot()
         await session.emit_env(
             "button_press",
             {
                 "button": request.button,
                 "frames": request.frames,
-                "before_frame": before,
+                "before_frame": before["frame"],
                 "after_frame": state["frame"],
+                "before": before,
+                "after": after,
                 "screen_sha256": state["screen"]["sha256"],
             },
         )
@@ -255,7 +328,7 @@ class RuntimeManager:
         session = self._require_session()
         executed: list[dict[str, Any]] = []
         async with session.lock:
-            before = session.emulator.frame
+            before = session.position_snapshot()
             for step in request.steps:
                 if step.type == "press":
                     if step.button is None:
@@ -268,12 +341,15 @@ class RuntimeManager:
                     session.invalidate_screen_cache()
                     executed.append({"type": "wait", "frames": step.frames})
             state = session.state_payload()
+            after = session.position_snapshot()
         await session.emit_env(
             "button_sequence",
             {
                 "steps": executed,
-                "before_frame": before,
+                "before_frame": before["frame"],
                 "after_frame": state["frame"],
+                "before": before,
+                "after": after,
                 "screen_sha256": state["screen"]["sha256"],
             },
         )
@@ -291,23 +367,61 @@ class RuntimeManager:
         async with session.lock:
             session.emulator.save_state(path)
             frame = session.emulator.frame
-        await session.emit_env("state_saved", {"name": request.name, "path": str(path), "frame": frame})
-        return {"run_id": session.run_id, "name": request.name, "path": str(path), "frame": frame}
+        sidecar_written = False
+        if request.agent_state is not None:
+            sidecar = self._agent_state_path(session.run_id, request.name)
+            sidecar.parent.mkdir(parents=True, exist_ok=True)
+            sidecar.write_text(json.dumps(request.agent_state), encoding="utf-8")
+            sidecar_written = True
+        await session.emit_env(
+            "state_saved",
+            {
+                "name": request.name,
+                "path": str(path),
+                "frame": frame,
+                "has_agent_state": sidecar_written,
+            },
+        )
+        return {
+            "run_id": session.run_id,
+            "name": request.name,
+            "path": str(path),
+            "frame": frame,
+            "has_agent_state": sidecar_written,
+        }
 
     async def load_state(self, request: SaveStateRequest) -> dict[str, Any]:
         session = self._require_session()
         path = self._state_path(session.run_id, request.name)
+        sidecar = self._agent_state_path(session.run_id, request.name)
         if not path.exists():
-            shared = self.states_dir / "shared" / f"{request.name}.state"
-            if shared.exists():
-                path = shared
+            shared_path = self.states_dir / "shared" / f"{request.name}.state"
+            if shared_path.exists():
+                path = shared_path
+                sidecar = self.states_dir / "shared" / f"{request.name}.agent.json"
             else:
                 raise HTTPException(status_code=404, detail=f"Save state not found: {request.name}")
+        agent_state: dict[str, Any] | None = None
+        if sidecar.exists():
+            try:
+                agent_state = json.loads(sidecar.read_text(encoding="utf-8"))
+            except Exception:
+                logger.exception("malformed agent state sidecar at %s", sidecar)
+                agent_state = None
         async with session.lock:
             session.emulator.load_state(path)
             session.invalidate_screen_cache()
             state = session.state_payload()
-        await session.emit_env("state_loaded", {"name": request.name, "path": str(path), "frame": state["frame"]})
+        await session.emit_env(
+            "state_loaded",
+            {
+                "name": request.name,
+                "path": str(path),
+                "frame": state["frame"],
+                "agent_state": agent_state,
+            },
+        )
+        state["agent_state"] = agent_state
         return state
 
     async def harness_event(self, request: HarnessEventRequest) -> dict[str, Any]:
@@ -318,6 +432,72 @@ class RuntimeManager:
         if source not in ("env", "harness"):
             raise HTTPException(status_code=400, detail="source must be env or harness")
         return self.trace_store.read(run_id, source)  # type: ignore[arg-type]
+
+    def frame_thumbnail_bytes(self, run_id: str, frame: int) -> bytes:
+        if frame < 0:
+            raise HTTPException(status_code=400, detail="frame must be non-negative")
+        path = self.trace_store.run_dir(run_id) / "frames" / f"{frame}.png"
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="frame thumbnail not found")
+        return path.read_bytes()
+
+    def list_run_states(self, run_id: str) -> list[dict[str, Any]]:
+        run_states_dir = self.states_dir / run_id
+        frames_by_name = self._frames_by_save_name(run_id)
+        return _list_state_files(run_states_dir, frames_by_name)
+
+    def list_shared_states(self) -> list[dict[str, Any]]:
+        return _list_state_files(self.states_dir / "shared", {})
+
+    def list_runs(self) -> list[dict[str, Any]]:
+        runs_dir = self.trace_store.runs_dir
+        if not runs_dir.exists():
+            return []
+        active_run_id = self.session.run_id if self.session else None
+        out: list[dict[str, Any]] = []
+        for run_dir in runs_dir.iterdir():
+            if not run_dir.is_dir():
+                continue
+            env_path = run_dir / "env.jsonl"
+            harness_path = run_dir / "harness.jsonl"
+            if not env_path.exists() and not harness_path.exists():
+                continue
+            stat = run_dir.stat()
+            out.append({
+                "run_id": run_dir.name,
+                "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+                "has_env": env_path.exists(),
+                "has_harness": harness_path.exists(),
+                "active": run_dir.name == active_run_id,
+            })
+        out.sort(key=lambda entry: entry["modified_at"], reverse=True)
+        return out
+
+    def delete_state(self, run_id: str, name: str) -> None:
+        # Reject names outside the safe alphabet up front so we cannot escape the run dir.
+        if not all(char.isalnum() or char in ("-", "_") for char in name) or not name:
+            raise HTTPException(status_code=422, detail="invalid state name")
+        path = self._state_path(run_id, name)
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="state not found")
+        path.unlink()
+
+    def _frames_by_save_name(self, run_id: str) -> dict[str, int]:
+        """Best-effort lookup of the frame each save state was written at."""
+        try:
+            events = self.trace_store.read(run_id, "env")
+        except Exception:
+            return {}
+        latest: dict[str, int] = {}
+        for event in events:
+            if event.get("type") != "state_saved":
+                continue
+            payload = event.get("payload") or {}
+            name = payload.get("name")
+            frame = payload.get("frame") if payload.get("frame") is not None else event.get("frame")
+            if isinstance(name, str) and isinstance(frame, int):
+                latest[name] = frame
+        return latest
 
     async def _playback_loop(self, session: Session) -> None:
         tick_counts = {"paused": 0, "1x": 1, "5x": 5, "max": 30}
@@ -339,6 +519,24 @@ class RuntimeManager:
 
     def _state_path(self, run_id: str, name: str) -> Path:
         return self.states_dir / run_id / f"{name}.state"
+
+    def _agent_state_path(self, run_id: str, name: str) -> Path:
+        return self.states_dir / run_id / f"{name}.agent.json"
+
+    def read_agent_state(self, run_id: str, name: str) -> dict[str, Any]:
+        # Validation mirrors delete_state — keep traversal off-limits.
+        if not all(char.isalnum() or char in ("-", "_") for char in name) or not name:
+            raise HTTPException(status_code=422, detail="invalid state name")
+        sidecar = self._agent_state_path(run_id, name)
+        if not sidecar.exists():
+            shared = self.states_dir / "shared" / f"{name}.agent.json"
+            if not shared.exists():
+                raise HTTPException(status_code=404, detail="agent state sidecar not found")
+            sidecar = shared
+        try:
+            return json.loads(sidecar.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"malformed sidecar: {exc}")
 
     def _require_session(self) -> Session:
         if self.session is None:

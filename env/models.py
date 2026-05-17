@@ -55,6 +55,10 @@ class SpeedRequest(BaseModel):
 
 class SaveStateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=80)
+    # Optional agent-side state (e.g. LLM message history) to persist alongside the
+    # emulator snapshot. Stored as <name>.agent.json next to <name>.state and returned
+    # by load_state so the agent can restore its own context on rewind.
+    agent_state: dict[str, Any] | None = None
 
     @field_validator("name")
     @classmethod

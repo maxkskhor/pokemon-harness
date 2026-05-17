@@ -1,16 +1,17 @@
 from __future__ import annotations
 
-import uuid
-from collections import deque
-from datetime import datetime, timezone
+import asyncio
+import logging
 from pathlib import Path
-from typing import Any, Callable, Deque
+from typing import Any, Callable
 
 from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from starlette.websockets import WebSocketDisconnect
 
 from env.emulator import Emulator
+from env.harness_registry import HarnessRegistry
 from env.models import (
     HarnessErrorRequest,
     HarnessEventRequest,
@@ -27,52 +28,7 @@ from env.runtime import RuntimeManager
 from env.trace import TraceStore
 
 
-class HarnessRegistry:
-    def __init__(self, max_commands: int = 20) -> None:
-        self._records: dict[str, dict[str, Any]] = {}
-        self._commands: dict[str, Deque[str]] = {}
-        self._max_commands = max_commands
-
-    def register(self, name: str) -> str:
-        hid = uuid.uuid4().hex[:8]
-        now = datetime.now(timezone.utc).isoformat()
-        self._records[hid] = {
-            "id": hid,
-            "name": name,
-            "status": "idle",
-            "error": None,
-            "created_at": now,
-            "updated_at": now,
-        }
-        self._commands[hid] = deque(maxlen=self._max_commands)
-        return hid
-
-    def list(self) -> list[dict[str, Any]]:
-        return [record.copy() for record in self._records.values()]
-
-    def require(self, harness_id: str) -> None:
-        if harness_id not in self._records:
-            raise KeyError(harness_id)
-
-    def update(self, harness_id: str, **updates: Any) -> None:
-        self.require(harness_id)
-        self._records[harness_id].update(updates)
-        self._records[harness_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
-
-    def enqueue(self, harness_id: str, command: str) -> None:
-        self.require(harness_id)
-        self._commands[harness_id].append(command)
-
-    def poll(self, harness_id: str) -> str | None:
-        self.require(harness_id)
-        queue = self._commands[harness_id]
-        if not queue:
-            return None
-        return queue.popleft()
-
-    def unregister(self, harness_id: str) -> None:
-        self._records.pop(harness_id, None)
-        self._commands.pop(harness_id, None)
+__all__ = ["create_app", "app"]
 
 
 def create_app(
@@ -143,7 +99,22 @@ def create_app(
 
     @api.post("/api/load-state")
     async def load_state(request: SaveStateRequest) -> dict[str, object]:
-        return await manager.load_state(request)
+        result = await manager.load_state(request)
+        # Notify any running harnesses so they can restore their own agent-side state
+        # (e.g. LLM message history) from the .agent.json sidecar via the GET endpoint
+        # below. The triggering agent dedupes echoes inside PokemonAgent.load_state.
+        if result.get("agent_state") is not None:
+            for record in harness_registry.list():
+                if record["status"] == "running":
+                    try:
+                        harness_registry.enqueue(record["id"], f"load_state:{request.name}")
+                    except KeyError:
+                        pass
+        return result
+
+    @api.get("/api/runs/{run_id}/states/{name}/agent")
+    async def read_agent_state(run_id: str, name: str) -> dict[str, Any]:
+        return manager.read_agent_state(run_id, name)
 
     @api.post("/api/harness/register")
     async def harness_register(request: HarnessRegisterRequest) -> dict[str, Any]:
@@ -204,6 +175,10 @@ def create_app(
         harness_registry.unregister(harness_id)
         return {"ok": True}
 
+    @api.get("/api/runs")
+    async def list_runs() -> list[dict[str, Any]]:
+        return manager.list_runs()
+
     @api.get("/api/runs/{run_id}/env-trace")
     async def env_trace(run_id: str) -> list[dict[str, object]]:
         return manager.read_trace(run_id, "env")
@@ -212,9 +187,59 @@ def create_app(
     async def harness_trace(run_id: str) -> list[dict[str, object]]:
         return manager.read_trace(run_id, "harness")
 
+    @api.get("/api/runs/{run_id}/frames/{frame}.png")
+    async def frame_thumbnail(run_id: str, frame: int) -> Response:
+        return Response(content=manager.frame_thumbnail_bytes(run_id, frame), media_type="image/png")
+
+    @api.get("/api/runs/{run_id}/states")
+    async def list_run_states(run_id: str) -> list[dict[str, Any]]:
+        return manager.list_run_states(run_id)
+
+    @api.get("/api/states/shared")
+    async def list_shared_states() -> list[dict[str, Any]]:
+        return manager.list_shared_states()
+
+    @api.delete("/api/runs/{run_id}/states/{name}")
+    async def delete_state(run_id: str, name: str) -> dict[str, Any]:
+        manager.delete_state(run_id, name)
+        return {"ok": True}
+
     @api.websocket("/ws/events")
     async def events(websocket: WebSocket) -> None:
         await manager.broker.connect(websocket)
+
+    @api.websocket("/api/harness/{harness_id}/control")
+    async def harness_control(websocket: WebSocket, harness_id: str) -> None:
+        """Push commands (play / stop / load_state:<name>) to an agent in real time.
+
+        The HTTP `/poll` endpoint is kept for backwards compatibility; the WS uses the
+        same FIFO queue as the backstop, so commands enqueued before the agent
+        connects are delivered on connect.
+        """
+        try:
+            harness_registry.require(harness_id)
+        except KeyError:
+            await websocket.close(code=4404)
+            return
+        await websocket.accept()
+        try:
+            while True:
+                # Drain anything already queued and push it.
+                cmd = harness_registry.poll(harness_id)
+                if cmd is not None:
+                    await websocket.send_json({"command": cmd})
+                    continue
+                # Nothing to send — re-check that the harness is still registered, then
+                # yield. 50 ms keeps the loop cheap (no client traffic) and snappy.
+                if not harness_registry.has(harness_id):
+                    break
+                await asyncio.sleep(0.05)
+        except WebSocketDisconnect:
+            pass
+        except Exception:  # pragma: no cover — defensive
+            logging.getLogger("pokemon_harness.control_ws").exception(
+                "harness control websocket failed harness_id=%s", harness_id
+            )
 
     return api
 

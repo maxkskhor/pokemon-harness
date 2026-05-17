@@ -71,6 +71,16 @@ class MyAgent(PokemonAgent):
         )
         self._history: list[dict] = []
 
+    def serialize_history(self) -> dict:
+        # Snapshot the rolling LLM history so a checkpoint can rewind not just the
+        # emulator but also the model's view of "what already happened".
+        return {"history": list(self._history)}
+
+    def restore_history(self, data: dict) -> None:
+        history = data.get("history") if isinstance(data, dict) else None
+        if isinstance(history, list):
+            self._history = list(history)
+
     def run(self) -> None:
         turn = 0
         self._history = [{"role": "system", "content": SYSTEM_PROMPT}]

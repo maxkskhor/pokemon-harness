@@ -127,12 +127,50 @@ export function stopHarness(id: string): Promise<{ ok: boolean }> {
   return request<{ ok: boolean }>(`/api/harness/${id}/stop`, { method: "POST" });
 }
 
+export interface SavedState {
+  name: string;
+  size: number;
+  modified_at: string;
+  frame?: number;
+}
+
+export interface RunSummary {
+  run_id: string;
+  modified_at: string;
+  has_env: boolean;
+  has_harness: boolean;
+  active: boolean;
+}
+
+export function listRuns(): Promise<RunSummary[]> {
+  return request<RunSummary[]>("/api/runs");
+}
+
+export function listRunStates(runId: string): Promise<SavedState[]> {
+  return request<SavedState[]>(`/api/runs/${encodeURIComponent(runId)}/states`);
+}
+
+export function listSharedStates(): Promise<SavedState[]> {
+  return request<SavedState[]>("/api/states/shared");
+}
+
+export function deleteRunState(runId: string, name: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(
+    `/api/runs/${encodeURIComponent(runId)}/states/${encodeURIComponent(name)}`,
+    { method: "DELETE" },
+  );
+}
+
 export function traceUrl(runId: string, source: TraceSource): string {
   return `${API_BASE}/api/runs/${runId}/${source}-trace`;
 }
 
 export function screenshotUrl(version: number): string {
   return `${API_BASE}/api/screenshot.png?v=${version}`;
+}
+
+export function frameThumbnailUrl(runId: string, frame: number): string {
+  return `${API_BASE}/api/runs/${encodeURIComponent(runId)}/frames/${frame}.png`;
 }
 
 export function wsUrl(): string {
