@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-05-17 (TODO completion sweep)
+
+### Added
+- `env/runtime.py`, `env/app.py`, `ui/src/api.ts`, `ui/src/checkpoints/FrameScrubber.tsx`, `ui/src/styles.css` - added frame listing plus a frame scrubber under the emulator screen. Scrubbing previews persisted thumbnails without mutating emulator state; rewind loads the nearest prior checkpoint so visual preview and actual rollback stay honest.
+- `harness/examples/my_agent.py`, `ui/src/trace/TraceList.tsx`, `ui/src/trace/helpers.ts` - added sanitized `llm_call` trace events with prompt messages, response, token usage, and latency, plus a filterable trace category and expandable call details.
+- `env/harness_registry.py`, `env/app.py`, `env/models.py`, `harness/agent.py`, `harness/client.py` - added registry `last_seen_at`, stale-disconnect pruning, `runs/registry.json` persistence, startup hydration with live statuses downgraded to `disconnected`, and UI status display for disconnected agents.
+- `env/trace.py`, `env/runtime.py`, `env/app.py`, `ui/src/api.ts` - added `since_timestamp` / `limit` trace reads and incremental UI reloads for larger traces.
+- `pyproject.toml`, `ui/eslint.config.js`, `ui/.prettierrc.json`, `ui/package.json`, `scripts/verify.sh` - added Pyright, ESLint, Prettier config, and verification wiring.
+- `ui/src/trace/`, `ui/src/checkpoints/`, `ui/src/run-picker/` - split trace rendering, checkpoint controls, the frame scrubber, and the run picker out of `ui/src/App.tsx`.
+- `tests/test_api.py`, `tests/test_my_agent.py` - regression coverage for frame lists, paginated trace reads, registry stale/persistence behavior, and sanitized LLM telemetry.
+
+### Changed
+- `ui/src/App.tsx` - reduced to the composition/root state owner after moving repeated UI surfaces into focused modules.
+- `TODO.md` - removed completed work items; the file now records no open TODOs.
+
 ## 2026-05-17 (correctness and DX cleanup)
 
 ### Added

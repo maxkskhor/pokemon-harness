@@ -89,6 +89,8 @@ class PyBoyEmulator:
 
     def screenshot_png(self) -> bytes:
         image = self.pyboy.screen.image
+        if image is None:
+            raise RuntimeError("PyBoy did not return a screen image")
         with io.BytesIO() as handle:
             image.save(handle, format="PNG")
             return handle.getvalue()

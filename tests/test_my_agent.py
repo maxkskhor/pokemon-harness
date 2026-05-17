@@ -12,6 +12,7 @@ from harness.examples.my_agent import (
     USER_TURN_TEXT,
     MyAgent,
     _extract_reasoning,
+    _strip_image_data,
     _strip_think_tags,
 )
 
@@ -80,6 +81,23 @@ def test_strip_think_tags_multiline():
 
 def test_strip_think_tags_no_tags():
     assert _strip_think_tags("LEFT") == "LEFT"
+
+
+def test_strip_image_data_replaces_inline_base64():
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc123"}},
+                {"type": "text", "text": "next?"},
+            ],
+        }
+    ]
+
+    stripped = _strip_image_data(messages)
+
+    assert stripped[0]["content"][0]["image_url"]["url"] == "<image omitted: see frame thumbnail>"
+    assert messages[0]["content"][0]["image_url"]["url"] == "data:image/png;base64,abc123"
 
 
 # ── conversation history ──────────────────────────────────────────────────────
@@ -224,6 +242,32 @@ def test_reasoning_included_in_emit():
     assert "map_id" not in payload
     assert "x" not in payload
     assert "y" not in payload
+
+
+def test_llm_call_event_includes_sanitized_messages_and_latency():
+    agent = _make_agent()
+
+    def side_effect(*args, **kwargs):
+        agent._stop_event.set()
+        msg = MagicMock()
+        msg.content = "UP"
+        del msg.reasoning
+        msg.model_extra = {}
+        usage = SimpleNamespace(prompt_tokens=10, completion_tokens=2, total_tokens=12)
+        return SimpleNamespace(choices=[SimpleNamespace(message=msg)], usage=usage)
+
+    agent._llm.chat.completions.create.side_effect = side_effect
+    agent.run()
+
+    emitted = agent._client.emit.call_args_list
+    llm_calls = [c for c in emitted if c.args[0] == "llm_call"]
+    assert llm_calls, "no llm_call event emitted"
+    payload = llm_calls[0].args[1]
+    user_content = payload["messages"][1]["content"]
+    assert user_content[0]["image_url"]["url"] == "<image omitted: see frame thumbnail>"
+    assert payload["response"] == "UP"
+    assert payload["usage"]["prompt_tokens"] == 10
+    assert isinstance(payload["usage"]["latency_ms"], int)
 
 
 def test_user_turn_message_format():

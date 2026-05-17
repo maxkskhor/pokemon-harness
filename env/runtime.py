@@ -439,10 +439,24 @@ class RuntimeManager:
         session = self._require_session()
         return await session.emit_harness(request)
 
-    def read_trace(self, run_id: str, source: str) -> list[dict[str, Any]]:
+    def read_trace(
+        self,
+        run_id: str,
+        source: str,
+        *,
+        since_timestamp: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
         if source not in ("env", "harness"):
             raise HTTPException(status_code=400, detail="source must be env or harness")
-        return self.trace_store.read(run_id, source)  # type: ignore[arg-type]
+        if limit is not None and (limit < 1 or limit > 5000):
+            raise HTTPException(status_code=422, detail="limit must be between 1 and 5000")
+        return self.trace_store.read(
+            run_id,
+            source,  # type: ignore[arg-type]
+            since_timestamp=since_timestamp,
+            limit=limit,
+        )
 
     def frame_thumbnail_bytes(self, run_id: str, frame: int) -> bytes:
         if frame < 0:
@@ -451,6 +465,20 @@ class RuntimeManager:
         if not path.exists():
             raise HTTPException(status_code=404, detail="frame thumbnail not found")
         return path.read_bytes()
+
+    def list_frames(self, run_id: str) -> list[int]:
+        frames_dir = self.trace_store.run_dir(run_id) / "frames"
+        if not frames_dir.exists():
+            return []
+        frames: list[int] = []
+        for path in frames_dir.iterdir():
+            if path.suffix != ".png" or not path.is_file():
+                continue
+            try:
+                frames.append(int(path.stem))
+            except ValueError:
+                continue
+        return sorted(frames)
 
     def list_run_states(self, run_id: str) -> list[dict[str, Any]]:
         safe_run_id = self._safe_name(run_id, "run_id")

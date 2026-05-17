@@ -78,12 +78,15 @@ class PokemonEnvClient:
         *,
         turn_id: str | None = None,
         frame: int | None = None,
+        harness_id: str | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"type": event_type, "payload": payload}
         if turn_id is not None:
             body["turn_id"] = turn_id
         if frame is not None:
             body["frame"] = frame
+        if harness_id is not None:
+            body["harness_id"] = harness_id
         return self._post("/api/harness/event", body)
 
     def _get(self, path: str) -> dict[str, Any]:
@@ -103,4 +106,3 @@ def press(button: str, frames: int = 8) -> dict[str, Any]:
 
 def wait(frames: int) -> dict[str, Any]:
     return {"type": "wait", "frames": frames}
-

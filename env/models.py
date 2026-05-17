@@ -71,6 +71,7 @@ class HarnessEventRequest(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     turn_id: str | None = Field(default=None, max_length=80)
     frame: int | None = Field(default=None, ge=0)
+    harness_id: str | None = Field(default=None, max_length=80)
 
 
 class HarnessRegisterRequest(BaseModel):
@@ -78,7 +79,7 @@ class HarnessRegisterRequest(BaseModel):
 
 
 class HarnessStatusRequest(BaseModel):
-    status: Literal["idle", "starting", "running", "stopping", "error"] = Field(min_length=1, max_length=20)
+    status: Literal["idle", "starting", "running", "stopping", "error", "disconnected"] = Field(min_length=1, max_length=20)
 
 
 class HarnessErrorRequest(BaseModel):

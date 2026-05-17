@@ -69,12 +69,26 @@ class TraceStore:
             handle.write(json.dumps(event, sort_keys=True) + "\n")
         return event
 
-    def read(self, run_id: str, source: Source) -> list[dict[str, Any]]:
+    def read(
+        self,
+        run_id: str,
+        source: Source,
+        *,
+        since_timestamp: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
         path = self.trace_path(run_id, source)
         if not path.exists():
             return []
-        events = []
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                events.append(json.loads(line))
+        events: list[dict[str, Any]] = []
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                event = json.loads(line)
+                if since_timestamp is not None and str(event.get("timestamp", "")) <= since_timestamp:
+                    continue
+                events.append(event)
+                if limit is not None and len(events) >= limit:
+                    break
         return events

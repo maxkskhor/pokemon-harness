@@ -112,7 +112,10 @@ class PokemonAgent:
         turn_id: str | None = None,
     ) -> None:
         """Emit an event visible in the UI trace panel."""
-        self._client.emit(event_type, payload, turn_id=turn_id)
+        if self._harness_id is None:
+            self._client.emit(event_type, payload, turn_id=turn_id)
+        else:
+            self._client.emit(event_type, payload, turn_id=turn_id, harness_id=self._harness_id)
 
     def should_stop(self) -> bool:
         """Return True if the UI sent a Stop signal — check this in your loop."""

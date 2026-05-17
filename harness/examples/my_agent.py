@@ -16,6 +16,8 @@ from __future__ import annotations
 import base64
 import os
 import re
+import time
+from typing import Any
 
 import openai
 from dotenv import load_dotenv
@@ -40,7 +42,7 @@ SYSTEM_PROMPT = (
 USER_TURN_TEXT = "What button should I press next?"
 
 
-def _extract_reasoning(response: openai.types.chat.ChatCompletion) -> str | None:
+def _extract_reasoning(response: Any) -> str | None:
     msg = response.choices[0].message
     # OpenRouter exposes reasoning as a direct field or in model_extra
     reasoning = getattr(msg, "reasoning", None)
@@ -60,16 +62,40 @@ def _strip_think_tags(text: str) -> str:
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
 
+def _strip_image_data(value: Any) -> Any:
+    """Return a JSON-safe copy of an OpenAI message tree without inline base64."""
+    if isinstance(value, list):
+        return [_strip_image_data(item) for item in value]
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for key, item in value.items():
+            if key == "url" and isinstance(item, str) and item.startswith("data:image/"):
+                out[key] = "<image omitted: see frame thumbnail>"
+            else:
+                out[key] = _strip_image_data(item)
+        return out
+    return value
+
+
+def _usage_payload(response: Any) -> dict[str, int | None]:
+    usage = getattr(response, "usage", None)
+    return {
+        "prompt_tokens": getattr(usage, "prompt_tokens", None),
+        "completion_tokens": getattr(usage, "completion_tokens", None),
+        "total_tokens": getattr(usage, "total_tokens", None),
+    }
+
+
 class MyAgent(PokemonAgent):
     name = "My Agent"
 
-    def __init__(self, **kwargs: object) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self._llm = openai.OpenAI(
+        self._llm: Any = openai.OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=os.environ["OPENROUTER_API_KEY"],
         )
-        self._history: list[dict] = []
+        self._history: list[dict[str, Any]] = []
 
     def serialize_history(self) -> dict:
         # Snapshot the rolling LLM history so a checkpoint can rewind not just the
@@ -102,13 +128,25 @@ class MyAgent(PokemonAgent):
             }
             self._history.append(user_msg)
 
+            started_at = time.perf_counter()
             response = self._llm.chat.completions.create(
                 model=MODEL,
                 messages=self._history,
             )
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
 
             raw = (response.choices[0].message.content or "").strip()
             reasoning = _extract_reasoning(response)
+            self.emit("llm_call", {
+                "model": MODEL,
+                "messages": _strip_image_data(self._history),
+                "response": raw,
+                "usage": {
+                    **_usage_payload(response),
+                    "latency_ms": latency_ms,
+                },
+            }, turn_id=turn_id)
+
             # Keep history clean: strip think tags from stored assistant response
             clean_response = _strip_think_tags(raw)
             action = clean_response.upper().split()[0] if clean_response else ""

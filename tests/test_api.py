@@ -60,6 +60,23 @@ def test_trace_separation(client: TestClient, fake_rom: Path, fake_sym: Path) ->
     assert all(event["source"] == "harness" for event in harness_trace)
 
 
+def test_trace_read_supports_since_timestamp_and_limit(client: TestClient, fake_rom: Path, fake_sym: Path) -> None:
+    start_fake_run(client, fake_rom, fake_sym)
+    client.post("/api/action/press", json={"button": "RIGHT", "frames": 8})
+    client.post("/api/action/press", json={"button": "DOWN", "frames": 8})
+
+    full = client.get("/api/runs/test-run/env-trace").json()
+    since = full[0]["timestamp"]
+
+    incremental = client.get(
+        "/api/runs/test-run/env-trace",
+        params={"since_timestamp": since, "limit": 1},
+    ).json()
+
+    assert len(incremental) == 1
+    assert incremental[0]["timestamp"] > since
+
+
 def test_save_state_writes_agent_sidecar_and_load_state_returns_it(client: TestClient, fake_rom: Path, fake_sym: Path) -> None:
     start_fake_run(client, fake_rom, fake_sym)
 
@@ -164,6 +181,31 @@ def test_harness_registry_queues_commands_fifo() -> None:
     assert registry.poll(harness_id) is None
 
 
+def test_harness_registry_marks_stale_running_agents_disconnected() -> None:
+    registry = HarnessRegistry()
+    harness_id = registry.register("Queue Agent")
+    registry.update(harness_id, status="running")
+    registry._records[harness_id]["last_seen_at"] = "2000-01-01T00:00:00+00:00"
+
+    registry.prune_stale(disconnect_after_s=1, prune_after_s=999999999)
+
+    assert registry.list()[0]["status"] == "disconnected"
+
+
+def test_harness_registry_persists_and_hydrates_as_disconnected(tmp_path: Path) -> None:
+    path = tmp_path / "registry.json"
+    registry = HarnessRegistry(storage_path=path)
+    harness_id = registry.register("Persistent Agent")
+    registry.update(harness_id, status="running")
+
+    restored = HarnessRegistry(storage_path=path)
+    record = next(item for item in restored.list() if item["id"] == harness_id)
+
+    assert record["name"] == "Persistent Agent"
+    assert record["status"] == "disconnected"
+    assert record["last_seen_at"]
+
+
 def test_harness_poll_preserves_rapid_play_stop(client: TestClient) -> None:
     registered = client.post("/api/harness/register", json={"name": "Smoke Agent"}).json()
     harness_id = registered["id"]
@@ -250,6 +292,17 @@ def test_frame_thumbnails_persist_and_serve(client: TestClient, fake_rom: Path, 
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
     assert response.content.startswith(b"\x89PNG")
+
+
+def test_list_frame_thumbnails(client: TestClient, fake_rom: Path, fake_sym: Path) -> None:
+    start_fake_run(client, fake_rom, fake_sym)
+    press = client.post("/api/action/press", json={"button": "RIGHT", "frames": 8}).json()
+
+    frames = client.get("/api/runs/test-run/frames").json()
+
+    assert frames == sorted(frames)
+    assert 0 in frames
+    assert press["frame"] in frames
 
 
 def test_frame_thumbnails_404_for_unknown_frame(client: TestClient, fake_rom: Path, fake_sym: Path) -> None:

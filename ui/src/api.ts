@@ -109,10 +109,11 @@ export function loadState(name: string): Promise<PokemonState> {
 export interface HarnessAgent {
   id: string;
   name: string;
-  status: "idle" | "starting" | "running" | "stopping" | "error";
+  status: "idle" | "starting" | "running" | "stopping" | "error" | "disconnected";
   error: string | null;
   created_at: string;
   updated_at: string;
+  last_seen_at: string;
 }
 
 export function listHarnesses(): Promise<HarnessAgent[]> {
@@ -151,6 +152,10 @@ export function listRunStates(runId: string): Promise<SavedState[]> {
   return request<SavedState[]>(`/api/runs/${encodeURIComponent(runId)}/states`);
 }
 
+export function listRunFrames(runId: string): Promise<number[]> {
+  return request<number[]>(`/api/runs/${encodeURIComponent(runId)}/frames`);
+}
+
 export function listSharedStates(): Promise<SavedState[]> {
   return request<SavedState[]>("/api/states/shared");
 }
@@ -162,8 +167,15 @@ export function deleteRunState(runId: string, name: string): Promise<{ ok: boole
   );
 }
 
-export function traceUrl(runId: string, source: TraceSource): string {
-  return `${API_BASE}/api/runs/${runId}/${source}-trace`;
+export function traceUrl(
+  runId: string,
+  source: TraceSource,
+  params: { sinceTimestamp?: string; limit?: number } = {},
+): string {
+  const url = new URL(`${API_BASE}/api/runs/${encodeURIComponent(runId)}/${source}-trace`);
+  if (params.sinceTimestamp) url.searchParams.set("since_timestamp", params.sinceTimestamp);
+  if (params.limit) url.searchParams.set("limit", String(params.limit));
+  return url.toString();
 }
 
 export function screenshotUrl(version: number): string {

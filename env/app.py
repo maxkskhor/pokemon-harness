@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import FastAPI, HTTPException, WebSocket
+from fastapi import FastAPI, HTTPException, Query, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from starlette.websockets import WebSocketDisconnect
@@ -44,10 +45,30 @@ def create_app(
     if states_dir:
         manager_kwargs["states_dir"] = states_dir
     manager = RuntimeManager(**manager_kwargs)
-    api = FastAPI(title="Pokemon Harness Environment", version="0.1.0")
+    harness_registry = HarnessRegistry(storage_path=manager.trace_store.runs_dir / "registry.json")
 
-    harness_registry = HarnessRegistry()
+    async def prune_harness_registry() -> None:
+        while True:
+            harness_registry.prune_stale(disconnect_after_s=30, prune_after_s=300)
+            await asyncio.sleep(5)
+
+    @asynccontextmanager
+    async def lifespan(api: FastAPI):
+        task = asyncio.create_task(prune_harness_registry())
+        api.state.registry_prune_task = task
+        try:
+            yield
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    api = FastAPI(title="Pokemon Harness Environment", version="0.1.0", lifespan=lifespan)
     api.state.manager = manager
+    api.state.harness_registry = harness_registry
+    api.state.registry_prune_task = None
 
     api.add_middleware(
         CORSMiddleware,
@@ -126,6 +147,11 @@ def create_app(
 
     @api.post("/api/harness/event")
     async def harness_event(request: HarnessEventRequest) -> dict[str, object]:
+        if request.harness_id is not None:
+            try:
+                harness_registry.touch(request.harness_id)
+            except KeyError:
+                pass
         return await manager.harness_event(request)
 
     @api.post("/api/harness/{harness_id}/play")
@@ -180,12 +206,24 @@ def create_app(
         return manager.list_runs()
 
     @api.get("/api/runs/{run_id}/env-trace")
-    async def env_trace(run_id: str) -> list[dict[str, object]]:
-        return manager.read_trace(run_id, "env")
+    async def env_trace(
+        run_id: str,
+        since_timestamp: str | None = None,
+        limit: int | None = Query(default=None, ge=1, le=5000),
+    ) -> list[dict[str, object]]:
+        return manager.read_trace(run_id, "env", since_timestamp=since_timestamp, limit=limit)
 
     @api.get("/api/runs/{run_id}/harness-trace")
-    async def harness_trace(run_id: str) -> list[dict[str, object]]:
-        return manager.read_trace(run_id, "harness")
+    async def harness_trace(
+        run_id: str,
+        since_timestamp: str | None = None,
+        limit: int | None = Query(default=None, ge=1, le=5000),
+    ) -> list[dict[str, object]]:
+        return manager.read_trace(run_id, "harness", since_timestamp=since_timestamp, limit=limit)
+
+    @api.get("/api/runs/{run_id}/frames")
+    async def list_frames(run_id: str) -> list[int]:
+        return manager.list_frames(run_id)
 
     @api.get("/api/runs/{run_id}/frames/{frame}.png")
     async def frame_thumbnail(run_id: str, frame: int) -> Response:
@@ -222,6 +260,7 @@ def create_app(
             await websocket.close(code=4404)
             return
         await websocket.accept()
+        last_touch = asyncio.get_event_loop().time()
         try:
             while True:
                 # Drain anything already queued and push it.
@@ -233,6 +272,10 @@ def create_app(
                 # yield. 50 ms keeps the loop cheap (no client traffic) and snappy.
                 if not harness_registry.has(harness_id):
                     break
+                now = asyncio.get_event_loop().time()
+                if now - last_touch >= 5:
+                    harness_registry.touch(harness_id)
+                    last_touch = now
                 await asyncio.sleep(0.05)
         except WebSocketDisconnect:
             pass

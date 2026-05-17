@@ -17,6 +17,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "pyright>=1.1.409",
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
 ]
@@ -32,3 +33,8 @@ packages = ["env", "harness"]
 pythonpath = ["."]
 testpaths = ["tests"]
 
+[tool.pyright]
+include = ["env", "harness"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+reportMissingTypeStubs = false
