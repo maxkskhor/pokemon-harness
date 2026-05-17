@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-05-17 (UI refinements)
+
+### Changed
+- `ui/src/App.tsx`, `ui/src/styles.css` — removed manual D-pad, A/B/START/SELECT game buttons, and 30-frame step button; the UI is observation-only now.
+- `ui/src/styles.css` — widened trace pane to 60% of viewport (was a fixed ~430px cap) to give more room for event inspection.
+- `ui/src/App.tsx` — changed default trace filters: `state` and `lifecycle` now off by default; `decision`, `llm`, `action`, `warning`, `error` remain on.
+
 ## 2026-05-17 (post-review followups)
 
 ### Fixed

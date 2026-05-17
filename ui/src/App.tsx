@@ -1,4 +1,4 @@
-import { Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Pause, Play, RefreshCw, RotateCcw, Square } from "lucide-react";
+import { Activity, Pause, Play, RefreshCw, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   API_BASE,
@@ -18,12 +18,10 @@ import {
   listSharedStates,
   loadState,
   playHarness,
-  pressButton,
   saveState,
   screenshotUrl,
   setSpeed,
   startRun,
-  stepFrames,
   stopHarness,
   stopRun,
   traceUrl,
@@ -62,8 +60,8 @@ export function App() {
     decision: true,
     llm: true,
     action: true,
-    state: true,
-    lifecycle: true,
+    state: false,
+    lifecycle: false,
     warning: true,
     error: true,
   });
@@ -388,19 +386,6 @@ export function App() {
         />
 
         <section className="control-band">
-          <div className="dpad">
-            <button aria-label="UP" className="up" onClick={() => runAction(() => pressButton("UP"))} disabled={!state || busy}><ArrowUp size={18} /></button>
-            <button aria-label="LEFT" className="left" onClick={() => runAction(() => pressButton("LEFT"))} disabled={!state || busy}><ArrowLeft size={18} /></button>
-            <button aria-label="RIGHT" className="right" onClick={() => runAction(() => pressButton("RIGHT"))} disabled={!state || busy}><ArrowRight size={18} /></button>
-            <button aria-label="DOWN" className="down" onClick={() => runAction(() => pressButton("DOWN"))} disabled={!state || busy}><ArrowDown size={18} /></button>
-          </div>
-
-          <div className="button-cluster">
-            {["A", "B", "START", "SELECT"].map((btn) => (
-              <button key={btn} onClick={() => runAction(() => pressButton(btn))} disabled={!state || busy}>{btn}</button>
-            ))}
-          </div>
-
           <div className="speed-controls">
             {speeds.map((mode) => (
               <button
@@ -412,11 +397,7 @@ export function App() {
                 {mode === "paused" ? <Pause size={14} /> : null}{mode}
               </button>
             ))}
-            <button onClick={() => runAction(() => stepFrames(30))} disabled={!state || busy}>
-              <RotateCcw size={14} /> 30f
-            </button>
           </div>
-
         </section>
 
         <section className="state-grid">
