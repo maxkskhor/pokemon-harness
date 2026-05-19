@@ -67,10 +67,10 @@ from harness import PokemonAgent
 
 class FirstAgent(PokemonAgent):
     name = "First Agent"
+    model = "qwen/qwen3.6-flash"
 
     def run(self) -> None:
         while not self.should_stop():
-            png = self.screenshot_bytes()
             state = self.state()
 
             self.emit("observation", {"pokemon": state["pokemon"]})
@@ -97,6 +97,8 @@ Inside `run()`, the main helpers are:
 | `load_state(name)` | Load a run-local or shared checkpoint |
 | `emit(type, payload)` | Add a structured event to the trace UI |
 | `should_stop()` | Check whether the UI asked the agent to stop |
+
+Override `serialize_history()` and `restore_history(data)` if your agent has message history, memory, or planning state that should rewind with a checkpoint.
 
 Use `turn()` to group one logical agent step:
 

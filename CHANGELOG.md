@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-05-19 (docs gardening)
+
+### Changed
+- `TODO.md` — restored it to an open-work list and moved the remaining future-work notes into it.
+- `AGENTS.md` — updated stale setup, reset/run lifecycle, and model-string notes.
+- `README.md` — documented agent `model` metadata and checkpoint sidecar hooks for agent history.
+- `docs/architecture.md` — refreshed runtime artifact notes and the current API endpoint list.
+
+### Removed
+- `IDEA.md` — removed the duplicate future-work scratch file now that open items live in `TODO.md`.
+
 ## 2026-05-19 (Reset button)
 
 ### Added

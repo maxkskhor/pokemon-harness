@@ -74,7 +74,7 @@ After completing any meaningful work, append an entry to `CHANGELOG.md`. Group b
 
 `TODO.md` is only for open work. When a TODO item is completed, remove it from `TODO.md` instead of striking it through, and record the completed work in `CHANGELOG.md`.
 
-## Pokemon Red intro sequence (setup_bedroom.py)
+## Pokemon Red intro sequence (`scripts/setup.py --create-bedroom-state`)
 
 - Oak's intro has **13 dialogue boxes** before the player naming screen.
 - After naming the player there are **6 dialogue boxes** before the rival naming screen.
@@ -103,7 +103,7 @@ raw = (response.choices[0].message.content or "").strip()
 
 ## Harness lifecycle
 
-- Each `FirstAgent()` instance gets a fixed `run_id` (set in `__init__`). Re-playing the same harness reuses the same run_id — the UI trace list appends rather than clearing.
+- Each `FirstAgent()` instance gets a generated run ID in `__init__`. Play resumes the active emulator run if one exists; Reset stops the env run, clears the turn counter, and generates a fresh run ID for the next Play.
 - Stale harness registrations (`status="stopping"` that never resolves) are from dead processes. Select a different entry in the dropdown with `status="idle"`.
 - After a harness errors, `_run_wrapped` sets status to "error" then "idle". The control loop keeps running — click Play again to restart without restarting the process.
 
@@ -117,7 +117,7 @@ raw = (response.choices[0].message.content or "").strip()
 
 Intended use:
 ```python
-with self.turn(goal="leave the bedroom") as turn_id:
+with self.turn(goal="leave the bedroom"):
     state = self.state()
     self.emit("observation", {"pokemon": state["pokemon"]})
     self.emit("decision", {"action": "RIGHT", "reasoning": "Moving toward the exit."})
@@ -145,5 +145,5 @@ To expose agent and model info in meta.json, set class attributes before calling
 ```python
 class FirstAgent(PokemonAgent):
     name = "First Agent"
-    model = "qwen/qwen3-6b-flash"
+    model = "qwen/qwen3.6-flash"
 ```
