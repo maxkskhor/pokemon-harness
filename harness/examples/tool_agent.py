@@ -131,7 +131,7 @@ class ToolAgent(PokemonAgent):
         if name == "get_state":
             state = self.state()
             pos = _pos_from_state(state)
-            return {"frame": state.get("frame"), **pos}
+            return pos
 
         if name == "move":
             direction = args["direction"]
