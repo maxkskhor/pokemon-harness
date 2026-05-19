@@ -285,7 +285,8 @@ export function App() {
   }
 
   async function handleStart() {
-    const next = await runAction(() => startRun(runId), false);
+    const id = state ? state.run_id : runId;
+    const next = await runAction(() => startRun(id), false);
     if (next) {
       setState(next);
       eventRunIdRef.current = next.run_id;
@@ -348,7 +349,11 @@ export function App() {
           <div className="emulator-controls" aria-label="Emulator controls">
             <span>Emulator</span>
             <div className="run-controls">
-              <input value={runId} onChange={(e) => setRunId(e.target.value)} aria-label="Run id" />
+              {state ? (
+                <span className="active-run-pill" title={`Active run: ${state.run_id}`}>{state.run_id}</span>
+              ) : (
+                <input value={runId} onChange={(e) => setRunId(e.target.value)} aria-label="New run id" placeholder="run id" />
+              )}
               <button onClick={handleStart} disabled={busy}>
                 <Play size={14} /> {state ? "Reset run" : "Start run"}
               </button>
@@ -489,6 +494,9 @@ export function App() {
             filters={traceFilters}
             isRunning={selectedHarness?.status === "running" || selectedHarness?.status === "starting"}
             autoScroll={scrubPreviewFrame == null}
+            runStates={runStates}
+            onLoadCheckpoint={handleLoadCheckpoint}
+            onSaveCheckpoint={state ? handleSaveCheckpoint : undefined}
           />
         </div>
       </aside>

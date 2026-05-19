@@ -15,6 +15,8 @@ class StartRunRequest(BaseModel):
     run_id: str | None = Field(default=None, min_length=1, max_length=80)
     rom_path: str | None = None
     sym_path: str | None = None
+    harness_id: str | None = Field(default=None, max_length=80)
+    start_state: str | None = Field(default=None, max_length=80)
 
     @field_validator("run_id")
     @classmethod
@@ -27,6 +29,7 @@ class StartRunRequest(BaseModel):
 class PressAction(BaseModel):
     button: Button
     frames: int = Field(default=8, ge=1, le=600)
+    turn_id: str | None = Field(default=None, max_length=80)
 
 
 class SequenceStep(BaseModel):
@@ -43,10 +46,12 @@ class SequenceStep(BaseModel):
 
 class SequenceAction(BaseModel):
     steps: list[SequenceStep] = Field(min_length=1, max_length=500)
+    turn_id: str | None = Field(default=None, max_length=80)
 
 
 class StepRequest(BaseModel):
     frames: int = Field(ge=1, le=3600)
+    turn_id: str | None = Field(default=None, max_length=80)
 
 
 class SpeedRequest(BaseModel):
@@ -76,6 +81,8 @@ class HarnessEventRequest(BaseModel):
 
 class HarnessRegisterRequest(BaseModel):
     name: str = Field(default="Harness", min_length=1, max_length=80)
+    model: str | None = Field(default=None, max_length=120)
+    metadata: dict[str, Any] | None = None
 
 
 class HarnessStatusRequest(BaseModel):

@@ -452,24 +452,10 @@ select {
   letter-spacing: 0.05em;
 }
 
-.run-picker {
+.run-picker-legacy {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.run-picker > span {
-  color: #667165;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.run-picker select {
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
 }
 
 .trace-title-row {
@@ -978,4 +964,340 @@ select {
   .state-grid {
     grid-template-columns: repeat(2, 1fr);
   }
+}
+
+/* ── Active run pill ──────────────────────────────────────────────── */
+
+.active-run-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  min-height: 32px;
+  border: 1px solid #2f8a65;
+  border-radius: 6px;
+  background: #eef7f1;
+  color: #17201c;
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Turn cards ───────────────────────────────────────────────────── */
+
+.turn-card {
+  border: 1px solid #c6d0e5;
+  border-radius: 8px;
+  background: #f6f8fd;
+  overflow: hidden;
+}
+
+.turn-card[data-status="error"] {
+  border-color: #d99898;
+  background: #fdf3f3;
+}
+
+.turn-card[data-status="in-progress"] {
+  border-color: #aacaba;
+  background: #f4fbf7;
+}
+
+.turn-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.5);
+  border-bottom: 1px solid #d7ddcf;
+  flex-wrap: wrap;
+}
+
+.turn-card-id {
+  font-size: 12px;
+  font-weight: 700;
+  color: #2a4a78;
+  letter-spacing: 0.03em;
+}
+
+.turn-card-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.turn-status-ok {
+  background: #d4f0e0;
+  color: #1a5c3a;
+}
+
+.turn-status-error {
+  background: #fde0d8;
+  color: #8b1a1a;
+}
+
+.turn-status-running {
+  background: #e0f7f0;
+  color: #1a5c3a;
+}
+
+.turn-card-elapsed {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: #667165;
+}
+
+.turn-card-goal {
+  font-size: 11px;
+  color: #46514b;
+  font-style: italic;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.turn-card-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+}
+
+.turn-thumbnail {
+  flex-shrink: 0;
+  margin-top: 0;
+}
+
+.turn-card-details {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.turn-card-row {
+  margin: 0;
+  font-size: 12px;
+  color: #17201c;
+  line-height: 1.4;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turn-card-row strong {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.turn-card-position {
+  color: #46514b;
+  font-size: 11px;
+}
+
+.turn-card-llm {
+  color: #2c5a6b;
+  font-size: 11px;
+}
+
+.turn-card-events {
+  border-top: 1px solid #d7ddcf;
+  padding: 4px 10px;
+}
+
+.turn-card-events-toggle {
+  width: 100%;
+  justify-content: flex-start;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #667165;
+  font-size: 12px;
+}
+
+.turn-card-events-toggle:hover:not(:disabled) {
+  border-color: transparent;
+  background: transparent;
+  color: #17201c;
+}
+
+.turn-raw-events {
+  margin: 6px 0 4px;
+  padding: 0;
+  gap: 4px;
+}
+
+.turn-card-actions {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  border-top: 1px solid #d7ddcf;
+  background: rgba(255, 255, 255, 0.4);
+  flex-wrap: wrap;
+}
+
+.turn-card-action-btn {
+  font-size: 11px;
+  min-height: 26px;
+  padding: 0 8px;
+  color: #2a5c4a;
+  background: #f0faf4;
+  border-color: #8fc4a8;
+}
+
+.turn-card-action-btn:hover:not(:disabled) {
+  background: #d4f0e0;
+  border-color: #2f8a65;
+}
+
+/* turn card blockquote overrides */
+.turn-card blockquote {
+  margin: 8px 0 0;
+  padding: 7px 9px;
+  border-left: 3px solid #8da0cf;
+  background: rgba(255, 255, 255, 0.7);
+  color: #2f3f59;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.turn-card blockquote.reasoning {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.turn-card blockquote.reasoning.expanded {
+  display: block;
+}
+
+/* ── Run comparison table ─────────────────────────────────────────── */
+
+.run-picker {
+  position: relative;
+}
+
+.run-picker-toggle {
+  width: 100%;
+  justify-content: space-between;
+  min-height: 32px;
+  background: #ffffff;
+  border-color: #abb6a6;
+  font-size: 13px;
+  padding: 0 10px;
+}
+
+.run-picker-drawer {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: #ffffff;
+  border: 1px solid #abb6a6;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  max-height: 360px;
+  overflow: auto;
+}
+
+.run-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.run-table th {
+  text-align: left;
+  padding: 6px 10px;
+  color: #667165;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-bottom: 1px solid #d7ddcf;
+  white-space: nowrap;
+  background: #f7faf5;
+  position: sticky;
+  top: 0;
+}
+
+.run-row {
+  cursor: pointer;
+  border-bottom: 1px solid #e8ede5;
+}
+
+.run-row:hover {
+  background: #f1f7ef;
+}
+
+.run-row.selected {
+  background: #e6f2ed;
+}
+
+.run-row td {
+  padding: 6px 10px;
+  color: #17201c;
+  vertical-align: middle;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-id-cell {
+  font-weight: 600;
+  color: #2a4a78 !important;
+  font-family: ui-monospace, monospace;
+  font-size: 11px !important;
+}
+
+.run-summary-cell {
+  max-width: 160px;
+  color: #46514b !important;
+  font-style: italic;
+}
+
+.run-status-badge {
+  display: inline-flex;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: capitalize;
+  background: #e8ede5;
+  color: #667165;
+}
+
+.run-status-running {
+  background: #d4f0e0;
+  color: #1a5c3a;
+}
+
+.run-status-stopped {
+  background: #e7e9e4;
+  color: #6f756d;
+}
+
+.run-status-error {
+  background: #fde0d8;
+  color: #8b1a1a;
 }

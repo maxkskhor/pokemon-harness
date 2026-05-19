@@ -114,7 +114,13 @@ class Session:
             "symbols_loaded": bool(self.symbols.labels),
         }
 
-    async def emit_env(self, event_type: str, payload: dict[str, Any], trace: bool = True) -> dict[str, Any]:
+    async def emit_env(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        trace: bool = True,
+        turn_id: str | None = None,
+    ) -> dict[str, Any]:
         if trace:
             event = self.trace_store.append(
                 run_id=self.run_id,
@@ -122,6 +128,7 @@ class Session:
                 event_type=event_type,
                 payload=payload,
                 frame=self.emulator.frame,
+                turn_id=turn_id,
             )
             self._save_frame_thumbnail(event["frame"])
         else:
@@ -249,7 +256,11 @@ class RuntimeManager:
         self.broker = EventBroker()
         self.session: Session | None = None
 
-    async def start_run(self, request: StartRunRequest) -> dict[str, Any]:
+    async def start_run(
+        self,
+        request: StartRunRequest,
+        agent_info: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if self.session is not None:
             await self.stop_run()
 
@@ -275,6 +286,7 @@ class RuntimeManager:
         )
         self.session = session
         session.playback_task = asyncio.create_task(self._playback_loop(session))
+        self._write_meta(session, agent_info=agent_info, start_state=request.start_state)
         await session.emit_env("run_started", {"rom": session.rom_metadata})
         return session.state_payload()
 
@@ -290,6 +302,7 @@ class RuntimeManager:
         async with session.lock:
             session.emulator.stop()
         await session.emit_env("run_stopped", {})
+        self._patch_meta(session.run_id, {"status": "stopped", "ended_at": now_iso()})
         self.session = None
         return {"running": False, "run_id": session.run_id}
 
@@ -310,7 +323,11 @@ class RuntimeManager:
             session.emulator.tick(request.frames)
             session.invalidate_screen_cache()
             state = session.state_payload()
-        await session.emit_env("step", {"frames": request.frames, "before_frame": before, "after_frame": state["frame"]})
+        await session.emit_env(
+            "step",
+            {"frames": request.frames, "before_frame": before, "after_frame": state["frame"]},
+            turn_id=request.turn_id,
+        )
         return state
 
     async def press(self, request: PressAction) -> dict[str, Any]:
@@ -332,6 +349,7 @@ class RuntimeManager:
                 "after": after,
                 "screen_sha256": state["screen"]["sha256"],
             },
+            turn_id=request.turn_id,
         )
         return state
 
@@ -363,6 +381,7 @@ class RuntimeManager:
                 "after": after,
                 "screen_sha256": state["screen"]["sha256"],
             },
+            turn_id=request.turn_id,
         )
         return state
 
@@ -437,7 +456,15 @@ class RuntimeManager:
 
     async def harness_event(self, request: HarnessEventRequest) -> dict[str, Any]:
         session = self._require_session()
-        return await session.emit_harness(request)
+        result = await session.emit_harness(request)
+        if request.type == "turn_finished":
+            p = request.payload
+            turns_patch: dict[str, Any] = {"turns": self._read_meta_turns(session.run_id) + 1}
+            summary = p.get("goal") or p.get("status")
+            if summary:
+                turns_patch["last_turn_summary"] = str(summary)
+            self._patch_meta(session.run_id, turns_patch)
+        return result
 
     def read_trace(
         self,
@@ -503,14 +530,25 @@ class RuntimeManager:
             if not env_path.exists() and not harness_path.exists():
                 continue
             stat = run_dir.stat()
-            out.append({
+            entry: dict[str, Any] = {
                 "run_id": run_dir.name,
                 "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
                 "has_env": env_path.exists(),
                 "has_harness": harness_path.exists(),
                 "active": run_dir.name == active_run_id,
                 "bytes": _directory_size(run_dir),
-            })
+            }
+            meta = self._load_meta(run_dir.name)
+            if meta:
+                entry["status"] = meta.get("status")
+                entry["started_at"] = meta.get("started_at")
+                entry["ended_at"] = meta.get("ended_at")
+                entry["turns"] = meta.get("turns", 0)
+                entry["last_turn_summary"] = meta.get("last_turn_summary")
+                entry["agent"] = meta.get("agent")
+                entry["rom"] = meta.get("rom")
+                entry["start_state"] = meta.get("start_state")
+            out.append(entry)
         out.sort(key=lambda entry: entry["modified_at"], reverse=True)
         return out
 
@@ -593,6 +631,60 @@ class RuntimeManager:
             return json.loads(sidecar.read_text(encoding="utf-8"))
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"malformed sidecar: {exc}")
+
+    def _meta_path(self, run_id: str) -> Path:
+        return self.trace_store.run_dir(run_id) / "meta.json"
+
+    def _write_meta(
+        self,
+        session: Session,
+        *,
+        agent_info: dict[str, Any] | None = None,
+        start_state: str | None = None,
+    ) -> None:
+        rom = session.rom_metadata
+        meta: dict[str, Any] = {
+            "run_id": session.run_id,
+            "status": "running",
+            "started_at": now_iso(),
+            "ended_at": None,
+            "turns": 0,
+            "agent": agent_info,
+            "rom": {
+                "filename": rom.get("filename"),
+                "sha1": rom.get("sha1"),
+                "title": rom.get("title"),
+            },
+            "start_state": start_state,
+            "last_turn_summary": None,
+        }
+        self._meta_path(session.run_id).write_text(
+            json.dumps(meta, sort_keys=True, indent=2), encoding="utf-8"
+        )
+
+    def _patch_meta(self, run_id: str, updates: dict[str, Any]) -> None:
+        path = self._meta_path(run_id)
+        try:
+            meta = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        except Exception:
+            meta = {}
+        meta.update(updates)
+        path.write_text(json.dumps(meta, sort_keys=True, indent=2), encoding="utf-8")
+
+    def _load_meta(self, run_id: str) -> dict[str, Any] | None:
+        path = self._meta_path(run_id)
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def _read_meta_turns(self, run_id: str) -> int:
+        meta = self._load_meta(run_id)
+        if meta is None:
+            return 0
+        return int(meta.get("turns", 0))
 
     def _require_session(self) -> Session:
         if self.session is None:

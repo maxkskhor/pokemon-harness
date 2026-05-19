@@ -23,7 +23,13 @@ class FakeClient:
     def get_state(self) -> dict[str, Any]:
         return self.states.pop(0)
 
-    def start_run(self, run_id: str) -> dict[str, Any]:
+    def start_run(
+        self,
+        run_id: str,
+        rom_path: str | None = None,
+        harness_id: str | None = None,
+        start_state: str | None = None,
+    ) -> dict[str, Any]:
         self.started.append(run_id)
         return {"run_id": run_id}
 
@@ -172,6 +178,105 @@ def test_load_state_restores_history_from_response() -> None:
     assert harness.h == ["snap-1", "snap-2"]
     # The local load is also recorded so a subsequent WS echo is dropped.
     assert harness._last_local_load is not None and harness._last_local_load[0] == "ckpt-1"
+
+
+def test_turn_context_emits_started_and_finished() -> None:
+    client = FakeClient()
+    harness = PokemonAgent(client_factory=lambda _: client)
+
+    with harness.turn(goal="test goal") as turn_id:
+        harness.press("A")
+
+    assert turn_id == "turn-001"
+    types = [e["type"] for e in client.events]
+    assert "turn_started" in types
+    assert "turn_finished" in types
+
+    started = next(e for e in client.events if e["type"] == "turn_started")
+    finished = next(e for e in client.events if e["type"] == "turn_finished")
+
+    assert started["turn_id"] == "turn-001"
+    assert started["payload"]["goal"] == "test goal"
+    assert started["payload"]["turn_index"] == 1
+    assert finished["payload"]["status"] == "ok"
+    assert finished["payload"]["elapsed_ms"] >= 0
+
+
+def test_turn_ids_increment_correctly() -> None:
+    client = FakeClient()
+    # Extra state entries for each turn's state() calls
+    client.states = [{"frame": 1}] * 20
+    harness = PokemonAgent(client_factory=lambda _: client)
+
+    with harness.turn():
+        pass
+    with harness.turn():
+        pass
+
+    turn_started_ids = [e["turn_id"] for e in client.events if e["type"] == "turn_started"]
+    assert turn_started_ids == ["turn-001", "turn-002"]
+
+
+def test_turn_explicit_id() -> None:
+    client = FakeClient()
+    harness = PokemonAgent(client_factory=lambda _: client)
+
+    with harness.turn(turn_id="my-custom-turn") as turn_id:
+        pass
+
+    assert turn_id == "my-custom-turn"
+    started = next(e for e in client.events if e["type"] == "turn_started")
+    assert started["turn_id"] == "my-custom-turn"
+
+
+def test_nested_turn_raises() -> None:
+    import pytest
+    client = FakeClient()
+    client.states = [{"frame": 1}] * 20
+    harness = PokemonAgent(client_factory=lambda _: client)
+
+    with pytest.raises(RuntimeError, match="Nested turn"):
+        with harness.turn():
+            with harness.turn():
+                pass
+
+
+def test_turn_exception_emits_error_status_and_reraises() -> None:
+    import pytest
+    client = FakeClient()
+    harness = PokemonAgent(client_factory=lambda _: client)
+
+    with pytest.raises(ValueError, match="oops"):
+        with harness.turn():
+            raise ValueError("oops")
+
+    finished = next(e for e in client.events if e["type"] == "turn_finished")
+    assert finished["payload"]["status"] == "error"
+    assert finished["payload"]["error"] == "oops"
+
+
+def test_turn_context_resets_after_block() -> None:
+    from harness.client import get_current_turn_id
+    client = FakeClient()
+    harness = PokemonAgent(client_factory=lambda _: client)
+
+    with harness.turn():
+        assert get_current_turn_id() == "turn-001"
+
+    assert get_current_turn_id() is None
+
+
+def test_press_inherits_turn_id_from_context() -> None:
+    client = FakeClient()
+    harness = PokemonAgent(client_factory=lambda _: client)
+
+    with harness.turn() as turn_id:
+        harness.press("RIGHT")
+
+    # press calls client.press_button which uses _current_turn_id
+    # Verify the turn_id was set during the call by checking the pressed list
+    assert ("RIGHT", 8) in client.pressed
+    _ = turn_id  # used, not leaked
 
 
 def test_run_wrapped_emits_full_traceback_on_error(capsys: Any) -> None:

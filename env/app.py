@@ -84,7 +84,18 @@ def create_app(
 
     @api.post("/api/run/start")
     async def start_run(request: StartRunRequest = StartRunRequest()) -> dict[str, object]:
-        return await manager.start_run(request)
+        agent_info: dict[str, Any] | None = None
+        if request.harness_id:
+            records = {r["id"]: r for r in harness_registry.list()}
+            record = records.get(request.harness_id)
+            if record:
+                agent_info = {
+                    "harness_id": request.harness_id,
+                    "name": record.get("name"),
+                    "model": record.get("model"),
+                    "metadata": record.get("metadata") or {},
+                }
+        return await manager.start_run(request, agent_info=agent_info)
 
     @api.post("/api/run/stop")
     async def stop_run() -> dict[str, object]:
@@ -139,7 +150,7 @@ def create_app(
 
     @api.post("/api/harness/register")
     async def harness_register(request: HarnessRegisterRequest) -> dict[str, Any]:
-        return {"id": harness_registry.register(request.name)}
+        return {"id": harness_registry.register(request.name, model=request.model, metadata=request.metadata)}
 
     @api.get("/api/harness/list")
     async def harness_list() -> list[dict[str, Any]]:

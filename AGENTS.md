@@ -110,3 +110,40 @@ raw = (response.choices[0].message.content or "").strip()
 ## PyBoy button press duration
 
 `press(button, frames=8)` holds the button for 8 frames. A full tile step in Pokemon Red takes ~16 frames. Eight frames is enough to register movement but the coordinate in memory may not update until the tile transition completes; the next `state()` call sees the new position.
+
+## Turn context API
+
+`PokemonAgent.turn()` is a context manager that groups all activity in one logical turn. The framework handles trace correlation, WebSocket delivery, and `meta.json` maintenance automatically.
+
+Intended use:
+```python
+with self.turn(goal="leave the bedroom") as turn_id:
+    state = self.state()
+    self.emit("observation", {"pokemon": state["pokemon"]})
+    self.emit("decision", {"action": "RIGHT", "reasoning": "Moving toward the exit."})
+    self.press("RIGHT")
+```
+
+**Do not pass `turn_id` manually** in the happy path. `emit`, `press`, `wait`, and `sequence` inherit the current turn ID via `contextvars.ContextVar` — no threading required.
+
+`turn_id` is only useful for advanced/debug cases (e.g. manually correlating events from a helper outside the with-block).
+
+**Nested turns raise `RuntimeError`.** There is no parent/child span tree in v1.
+
+Turn IDs are auto-generated as `turn-001`, `turn-002`, etc. and reset to 0 when a new run starts. An explicit `turn_id` may be passed for deterministic test setups.
+
+## meta.json lifecycle
+
+`runs/<run_id>/meta.json` is written by the env backend — agent code never writes it. Fields:
+- `status`: `"running"` while env session is active; `"stopped"` after `stop_run`.
+- `turns`: incremented by 1 each time a `turn_finished` event is received.
+- `last_turn_summary`: taken from `turn_finished.payload.goal` or `status`.
+- `agent`: populated from the harness registry record at run-start time.
+- `rom`: populated from the loaded ROM metadata.
+
+To expose agent and model info in meta.json, set class attributes before calling `serve()`:
+```python
+class MyAgent(PokemonAgent):
+    name = "My Agent"
+    model = "qwen/qwen3-6b-flash"
+```

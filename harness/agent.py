@@ -7,11 +7,12 @@ import time
 import traceback
 import uuid
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from queue import Empty, Queue
-from typing import Any, Callable
+from typing import Any, Callable, Generator
 
-from harness.client import PokemonEnvClient
+from harness.client import PokemonEnvClient, _current_turn_id
 
 logger = logging.getLogger("pokemon_harness.agent")
 
@@ -25,6 +26,7 @@ class PokemonAgent:
     """
 
     name: str = "My Pokemon Agent"
+    model: str | None = None
 
     def __init__(
         self,
@@ -43,6 +45,7 @@ class PokemonAgent:
         self._cmd_queue: Queue[str] = Queue()
         self._ws_thread: threading.Thread | None = None
         self._harness_id: str | None = None
+        self._turn_counter: int = 0
         # When the agent itself calls load_state, the env also pushes a
         # load_state:<name> command back via the control WS. Track the most recent
         # local restore so we ignore that echo (dedup window: 5 s).
@@ -121,6 +124,76 @@ class PokemonAgent:
         """Return True if the UI sent a Stop signal — check this in your loop."""
         return self._stop_event.is_set()
 
+    @contextmanager
+    def turn(
+        self,
+        goal: str | None = None,
+        *,
+        turn_id: str | None = None,
+    ) -> Generator[str, None, None]:
+        """Scoped turn context.
+
+        Usage::
+
+            with self.turn(goal="leave the bedroom") as turn_id:
+                self.emit("decision", {"action": "RIGHT"})
+                self.press("RIGHT")
+
+        Emits `turn_started` on entry and `turn_finished` on exit.
+        Nested turns raise RuntimeError — complete the outer turn first.
+        """
+        if _current_turn_id.get() is not None:
+            raise RuntimeError(
+                "Nested turn contexts are not supported. "
+                "Complete the outer turn before starting a new one."
+            )
+
+        self._turn_counter += 1
+        tid = turn_id or f"turn-{self._turn_counter:03d}"
+        token = _current_turn_id.set(tid)
+
+        frame: int | None = None
+        try:
+            frame = self.state().get("frame")
+        except Exception:
+            pass
+
+        started_at = time.monotonic()
+        start_payload: dict[str, Any] = {
+            "turn_id": tid,
+            "turn_index": self._turn_counter,
+        }
+        if goal is not None:
+            start_payload["goal"] = goal
+        if frame is not None:
+            start_payload["frame"] = frame
+        self._emit_safe("turn_started", start_payload, turn_id=tid)
+
+        status = "ok"
+        error_summary: str | None = None
+        try:
+            yield tid
+        except Exception as exc:
+            status = "error"
+            error_summary = str(exc)
+            raise
+        finally:
+            elapsed_ms = int((time.monotonic() - started_at) * 1000)
+            finish_payload: dict[str, Any] = {
+                "turn_id": tid,
+                "turn_index": self._turn_counter,
+                "status": status,
+                "elapsed_ms": elapsed_ms,
+            }
+            if error_summary is not None:
+                finish_payload["error"] = error_summary
+            try:
+                finish_payload["frame"] = self.state().get("frame")
+            except Exception:
+                pass
+            self._emit_safe("turn_finished", finish_payload, turn_id=tid)
+            _current_turn_id.reset(token)
+
     # ── override these to make checkpoints carry agent context ───────
 
     def serialize_history(self) -> dict[str, Any]:
@@ -161,7 +234,10 @@ class PokemonAgent:
         print(f"Connecting to {self._base_url} ...")
         self._client.wait_for_server()
 
-        resp = self._client._post("/api/harness/register", {"name": self.name})
+        register_payload: dict[str, Any] = {"name": self.name}
+        if self.model is not None:
+            register_payload["model"] = self.model
+        resp = self._client._post("/api/harness/register", register_payload)
         self._harness_id = resp["id"]
         print(f"Registered '{self.name}' (id={self._harness_id})")
         print("Open the UI, select this agent from the dropdown, and click Play.")
@@ -313,7 +389,12 @@ class PokemonAgent:
             state = self._client.get_state()
         except Exception:
             self._run_id = self._new_run_id()
-            self._client.start_run(self._run_id)
+            self._client.start_run(
+                self._run_id,
+                harness_id=self._harness_id,
+                start_state=self._load_state,
+            )
+            self._turn_counter = 0
             self._emit_safe("lifecycle", {"status": "run_started", "run_id": self._run_id})
             if self._load_state:
                 try:
@@ -329,6 +410,7 @@ class PokemonAgent:
         active_run_id = state.get("run_id")
         if isinstance(active_run_id, str) and active_run_id:
             self._run_id = active_run_id
+        self._turn_counter = 0
         self._emit_safe(
             "lifecycle",
             {

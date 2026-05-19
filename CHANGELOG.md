@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-05-19 (turn-context observability + run metadata)
+
+### Added
+- `harness/client.py` — `_current_turn_id` ContextVar + `get_current_turn_id()` shared helper; `press_button`, `wait`, `press_sequence`, `emit` automatically inherit the active turn ID without caller plumbing.
+- `harness/agent.py` — `turn()` context manager: auto-generates `turn-001`/`turn-002` IDs, emits `turn_started`/`turn_finished` boundary events with goal, frame, elapsed_ms, status; guards nested turns with RuntimeError; resets ContextVar on exit.
+- `harness/agent.py` — `model` class attribute for agent authors; `name`/`model` forwarded to harness register request.
+- `env/models.py` — `turn_id` field on `PressAction`, `SequenceAction`, `StepRequest`; `harness_id`/`start_state` on `StartRunRequest`; `model`/`metadata` on `HarnessRegisterRequest`.
+- `env/runtime.py` — `Session.emit_env` accepts `turn_id`; `press`, `sequence`, `step` propagate request's `turn_id` into env trace rows. `_write_meta`, `_patch_meta`, `_load_meta` helpers; `start_run` writes `meta.json`; `stop_run` updates status/ended_at; `harness_event` increments turns/last_turn_summary on `turn_finished`; `list_runs` merges meta.json fields.
+- `env/harness_registry.py` — `register` now stores `model` and `metadata`.
+- `env/app.py` — `/api/run/start` resolves harness record and passes agent_info to start_run; `/api/harness/register` forwards model/metadata.
+- `ui/src/trace/TurnCard.tsx` — new turn-summary card component with status badge, elapsed time, goal, thumbnail, decision/action summary, position delta, LLM usage, reasoning, expandable raw events, and checkpoint affordances (load near this turn / save checkpoint here).
+- `ui/src/styles.css` — styles for active-run pill, turn cards, run comparison table.
+
+### Changed
+- `ui/src/trace/TraceList.tsx` — turn-first rendering: events grouped into turn cards + Session group for unturn'd events.
+- `ui/src/run-picker/RunPicker.tsx` — replaced dropdown with collapsible comparison table showing status, agent, model, turns, last turn summary, started time, and size.
+- `ui/src/api.ts` — `RunSummary` extended with meta.json fields (status, started_at, ended_at, turns, last_turn_summary, agent, rom, start_state).
+- `ui/src/App.tsx` — active run shows read-only pill instead of editable input; "Reset run" uses `state.run_id` so it cannot drift; passes checkpoint props to TraceList for turn-card affordances.
+- `AGENTS.md` — documented turn context API and meta.json lifecycle.
+
+### Tests
+- `tests/test_harness_base.py` — added FakeClient `start_run` signature update; added 7 turn-context unit tests (started/finished events, ID increment, explicit ID, nested turn error, exception status, context reset, turn-ID inheritance by press).
+- `tests/test_api.py` — added tests: press/step/sequence with turn_id write to env trace; meta.json written on start, updated on stop, turns increment on turn_finished, list_runs includes meta fields; harness register stores model/metadata.
+
+## 2026-05-19 (turn-context observability plan)
+
+### Added
+- `TODO.md` — added a detailed implementation plan for turn-context observability, backend-owned run metadata, turn summary cards, active-run UX cleanup, run comparison, and branch/rewind affordances. The plan explicitly keeps the agent-author API high-level so harness users do not need to manage WebSockets, streaming, playback frames, trace merging, or metadata files.
+
+### Changed
+- `TODO.md` — expanded each planned implementation area with concrete verification gates so future implementation can prove when the feature is successfully built.
+
 ## 2026-05-17 (agent play resume)
 
 ### Changed

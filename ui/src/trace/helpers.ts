@@ -30,6 +30,9 @@ export function eventCategory(event: TraceEvent): FilterType {
       return "warning";
     case "error":
       return "error";
+    case "turn_started":
+    case "turn_finished":
+      return "lifecycle";
     default:
       return "lifecycle";
   }
@@ -126,6 +129,15 @@ export function summarizeEvent(event: TraceEvent): string {
   }
   if (event.type === "run_stopped") {
     return "run stopped";
+  }
+  if (event.type === "turn_started") {
+    const goal = payload.goal ? ` – ${payload.goal}` : "";
+    return `turn ${payload.turn_index ?? ""} started${goal}`;
+  }
+  if (event.type === "turn_finished") {
+    const status = payload.status ?? "ok";
+    const ms = payload.elapsed_ms != null ? ` · ${payload.elapsed_ms}ms` : "";
+    return `turn ${payload.turn_index ?? ""} finished [${status}]${ms}`;
   }
   return payloadText(payload, ["summary", "message", "content", "text"]) ?? event.type.replaceAll("_", " ");
 }

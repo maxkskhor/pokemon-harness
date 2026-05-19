@@ -1,14 +1,14 @@
 import { ChevronDown, ChevronRight, MessageSquareText } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { frameThumbnailUrl, type TraceEvent } from "../api";
+import { frameThumbnailUrl, type SavedState, type TraceEvent } from "../api";
+import { TurnCard } from "./TurnCard";
 import {
   CATEGORY_ICON,
   eventCategory,
   eventLabel,
   formatDelta,
   formatPayload,
-  groupLabel,
   payloadText,
   summarizeEvent,
   type FilterType,
@@ -19,11 +19,17 @@ export function TraceList({
   filters,
   isRunning,
   autoScroll,
+  runStates = [],
+  onLoadCheckpoint,
+  onSaveCheckpoint,
 }: {
   events: TraceEvent[];
   filters: Record<FilterType, boolean>;
   isRunning: boolean;
   autoScroll: boolean;
+  runStates?: SavedState[];
+  onLoadCheckpoint?: (name: string) => void;
+  onSaveCheckpoint?: () => void;
 }) {
   const listRef = useRef<HTMLOListElement | null>(null);
   useEffect(() => {
@@ -31,22 +37,6 @@ export function TraceList({
       listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
     }
   }, [events.length, isRunning, autoScroll]);
-
-  const visibleEvents = events.filter((event) => filters[eventCategory(event)]);
-  const groupedEvents = visibleEvents.reduce<Array<{ label: string; events: TraceEvent[] }>>((groups, event) => {
-    const label = groupLabel(event);
-    const current = groups[groups.length - 1];
-    if (current?.label === label) {
-      current.events.push(event);
-    } else {
-      groups.push({ label, events: [event] });
-    }
-    return groups;
-  }, []);
-  const deltas = new Map<TraceEvent, string>();
-  visibleEvents.forEach((event, index) => {
-    deltas.set(event, formatDelta(event, visibleEvents[index - 1] ?? null));
-  });
 
   if (!events.length) {
     return (
@@ -57,15 +47,51 @@ export function TraceList({
     );
   }
 
-  if (!visibleEvents.length) {
+  // Split events into turns (have turn_id) and session events (no turn_id)
+  const sessionEvents = events.filter((e) => !e.turn_id && filters[eventCategory(e)]);
+  const turnEventMap = new Map<string, TraceEvent[]>();
+  for (const event of events) {
+    if (!event.turn_id) continue;
+    const bucket = turnEventMap.get(event.turn_id) ?? [];
+    bucket.push(event);
+    turnEventMap.set(event.turn_id, bucket);
+  }
+
+  // Order turns by first appearance
+  const turnIds: string[] = [];
+  for (const event of events) {
+    if (event.turn_id && !turnIds.includes(event.turn_id)) {
+      turnIds.push(event.turn_id);
+    }
+  }
+
+  const hasTurns = turnIds.length > 0;
+  const hasSession = sessionEvents.length > 0;
+
+  if (!hasTurns && !hasSession) {
     return <div className="trace-empty">No events match the selected filters</div>;
   }
 
+  const deltas = new Map<TraceEvent, string>();
+  sessionEvents.forEach((event, index) => {
+    deltas.set(event, formatDelta(event, sessionEvents[index - 1] ?? null));
+  });
+
   return (
     <ol className="trace-list" ref={listRef}>
-      {groupedEvents.map((group) => (
-        <TraceGroup key={`${group.label}-${group.events[0]?.timestamp}`} group={group} deltas={deltas} />
+      {turnIds.map((turn_id) => (
+        <TurnCard
+          key={turn_id}
+          turn_id={turn_id}
+          events={turnEventMap.get(turn_id) ?? []}
+          runStates={runStates}
+          onLoadCheckpoint={onLoadCheckpoint}
+          onSaveCheckpoint={onSaveCheckpoint}
+        />
       ))}
+      {hasSession && (
+        <SessionGroup events={sessionEvents} deltas={deltas} />
+      )}
       {isRunning ? (
         <li className="trace-item trace-waiting">
           <span className="run-pulse" />
@@ -76,28 +102,32 @@ export function TraceList({
   );
 }
 
-function TraceGroup({
-  group,
+function SessionGroup({
+  events,
   deltas,
 }: {
-  group: { label: string; events: TraceEvent[] };
+  events: TraceEvent[];
   deltas: Map<TraceEvent, string>;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   return (
     <li className="trace-group">
-      <button className="trace-group-header" onClick={() => setCollapsed((value) => !value)}>
+      <button className="trace-group-header" onClick={() => setCollapsed((v) => !v)}>
         {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-        <span>{group.label}</span>
-        <em>{group.events.length}</em>
+        <span>Session</span>
+        <em>{events.length}</em>
       </button>
-      {!collapsed ? (
+      {!collapsed && (
         <ol>
-          {group.events.map((event, index) => (
-            <TraceItem key={`${event.timestamp}-${event.type}-${index}`} event={event} delta={deltas.get(event) ?? "+0.0 s"} />
+          {events.map((event, index) => (
+            <TraceItem
+              key={`${event.timestamp}-${event.type}-${index}`}
+              event={event}
+              delta={deltas.get(event) ?? "+0.0 s"}
+            />
           ))}
         </ol>
-      ) : null}
+      )}
     </li>
   );
 }

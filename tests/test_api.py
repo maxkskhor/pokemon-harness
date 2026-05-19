@@ -252,6 +252,112 @@ def test_harness_control_ws_closes_for_unknown_id(client: TestClient) -> None:
         assert exc.code == 4404
 
 
+def test_press_with_turn_id_writes_turn_id_to_env_trace(client: TestClient, fake_rom: Path, fake_sym: Path) -> None:
+    start_fake_run(client, fake_rom, fake_sym)
+
+    client.post("/api/action/press", json={"button": "RIGHT", "frames": 8, "turn_id": "turn-test"})
+
+    env_trace = client.get("/api/runs/test-run/env-trace").json()
+    press_event = next(e for e in env_trace if e["type"] == "button_press")
+    assert press_event["turn_id"] == "turn-test"
+
+
+def test_press_without_turn_id_keeps_null_turn_id(client: TestClient, fake_rom: Path, fake_sym: Path) -> None:
+    start_fake_run(client, fake_rom, fake_sym)
+
+    client.post("/api/action/press", json={"button": "RIGHT", "frames": 8})
+
+    env_trace = client.get("/api/runs/test-run/env-trace").json()
+    press_event = next(e for e in env_trace if e["type"] == "button_press")
+    assert press_event["turn_id"] is None
+
+
+def test_step_with_turn_id_writes_turn_id(client: TestClient, fake_rom: Path, fake_sym: Path) -> None:
+    start_fake_run(client, fake_rom, fake_sym)
+
+    client.post("/api/step", json={"frames": 4, "turn_id": "turn-step"})
+
+    env_trace = client.get("/api/runs/test-run/env-trace").json()
+    step_event = next(e for e in env_trace if e["type"] == "step")
+    assert step_event["turn_id"] == "turn-step"
+
+
+def test_sequence_with_turn_id_writes_turn_id(client: TestClient, fake_rom: Path, fake_sym: Path) -> None:
+    start_fake_run(client, fake_rom, fake_sym)
+
+    client.post(
+        "/api/action/sequence",
+        json={"steps": [{"type": "press", "button": "A", "frames": 8}], "turn_id": "turn-seq"},
+    )
+
+    env_trace = client.get("/api/runs/test-run/env-trace").json()
+    seq_event = next(e for e in env_trace if e["type"] == "button_sequence")
+    assert seq_event["turn_id"] == "turn-seq"
+
+
+def _runs_dir(client: TestClient) -> Path:
+    return client.app.state.manager.trace_store.runs_dir
+
+
+def test_meta_json_written_on_start_run(client: TestClient, fake_rom: Path, fake_sym: Path) -> None:
+    import json
+
+    start_fake_run(client, fake_rom, fake_sym, run_id="meta-test")
+
+    meta_path = _runs_dir(client) / "meta-test" / "meta.json"
+    assert meta_path.exists(), "meta.json should be written on start_run"
+    meta = json.loads(meta_path.read_text())
+    assert meta["run_id"] == "meta-test"
+    assert meta["status"] == "running"
+    assert meta["turns"] == 0
+    assert meta["ended_at"] is None
+
+
+def test_meta_json_status_updated_on_stop_run(client: TestClient, fake_rom: Path, fake_sym: Path) -> None:
+    import json
+
+    start_fake_run(client, fake_rom, fake_sym, run_id="meta-stop-test")
+    client.post("/api/run/stop")
+
+    meta_path = _runs_dir(client) / "meta-stop-test" / "meta.json"
+    meta = json.loads(meta_path.read_text())
+    assert meta["status"] == "stopped"
+    assert meta["ended_at"] is not None
+
+
+def test_meta_json_turns_increment_on_turn_finished(client: TestClient, fake_rom: Path, fake_sym: Path) -> None:
+    import json
+
+    start_fake_run(client, fake_rom, fake_sym, run_id="meta-turns-test")
+
+    client.post("/api/harness/event", json={"type": "turn_finished", "payload": {"turn_id": "turn-001", "status": "ok", "elapsed_ms": 100}})
+    client.post("/api/harness/event", json={"type": "turn_finished", "payload": {"turn_id": "turn-002", "status": "ok", "elapsed_ms": 200}})
+
+    meta_path = _runs_dir(client) / "meta-turns-test" / "meta.json"
+    meta = json.loads(meta_path.read_text())
+    assert meta["turns"] == 2
+
+
+def test_list_runs_includes_meta_fields(client: TestClient, fake_rom: Path, fake_sym: Path) -> None:
+    start_fake_run(client, fake_rom, fake_sym, run_id="meta-list-test")
+
+    runs = client.get("/api/runs").json()
+    run = next((r for r in runs if r["run_id"] == "meta-list-test"), None)
+    assert run is not None
+    assert run["run_id"] == "meta-list-test"
+    # meta.json was written so status should appear
+    assert run.get("status") == "running"
+
+
+def test_harness_register_stores_model_and_metadata() -> None:
+    registry = HarnessRegistry()
+    harness_id = registry.register("Smart Agent", model="gpt-4o", metadata={"version": "1"})
+
+    record = next(r for r in registry.list() if r["id"] == harness_id)
+    assert record["model"] == "gpt-4o"
+    assert record["metadata"] == {"version": "1"}
+
+
 def test_state_screen_hash_is_cached_until_frame_changes(tmp_path: Path, fake_rom: Path, fake_sym: Path) -> None:
     class CountingFakeEmulator(FakeEmulator):
         def __init__(self, rom_path: Path | None = None, sym_path: Path | None = None):

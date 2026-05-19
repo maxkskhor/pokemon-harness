@@ -40,12 +40,20 @@ class HarnessRegistry:
         self._storage_path = storage_path
         self._hydrate()
 
-    def register(self, name: str) -> str:
+    def register(
+        self,
+        name: str,
+        *,
+        model: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
         hid = uuid.uuid4().hex[:8]
         now = _now()
         self._records[hid] = {
             "id": hid,
             "name": name,
+            "model": model,
+            "metadata": metadata or {},
             "status": "idle",
             "error": None,
             "created_at": now,
@@ -143,6 +151,8 @@ class HarnessRegistry:
                 record["status"] = "disconnected"
             now = _now()
             record.setdefault("name", "Harness")
+            record.setdefault("model", None)
+            record.setdefault("metadata", {})
             record.setdefault("error", None)
             record.setdefault("created_at", now)
             record.setdefault("updated_at", now)

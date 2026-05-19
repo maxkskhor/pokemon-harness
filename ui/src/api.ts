@@ -142,6 +142,24 @@ export interface RunSummary {
   has_harness: boolean;
   active: boolean;
   bytes: number;
+  // meta.json fields (present when available)
+  status?: string;
+  started_at?: string;
+  ended_at?: string | null;
+  turns?: number;
+  last_turn_summary?: string | null;
+  agent?: {
+    harness_id?: string;
+    name?: string;
+    model?: string | null;
+    metadata?: Record<string, unknown>;
+  } | null;
+  rom?: {
+    filename?: string;
+    sha1?: string | null;
+    title?: string | null;
+  } | null;
+  start_state?: string | null;
 }
 
 export function listRuns(): Promise<RunSummary[]> {
