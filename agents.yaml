@@ -1,0 +1,5 @@
+agents:
+  - name: first_agent
+    module: harness.examples.first_agent
+  - name: tool_agent
+    module: harness.examples.tool_agent

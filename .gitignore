@@ -24,6 +24,9 @@ runs/*
 *.png
 !docs/assets/*.png
 
+# Agent process logs.
+logs/
+
 # Frontend artifacts.
 ui/node_modules/
 ui/dist/
