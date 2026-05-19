@@ -307,6 +307,25 @@ class RuntimeManager:
         self.session = None
         return {"running": False, "run_id": session.run_id}
 
+    async def pause_run(self) -> dict[str, Any]:
+        session = self._require_session()
+        session.running = False
+        if session.playback_task is not None:
+            session.playback_task.cancel()
+            try:
+                await session.playback_task
+            except asyncio.CancelledError:
+                pass
+            session.playback_task = None
+        return {"paused": True, "run_id": session.run_id}
+
+    async def resume_run(self) -> dict[str, Any]:
+        session = self._require_session()
+        session.running = True
+        if session.playback_task is None or session.playback_task.done():
+            session.playback_task = asyncio.create_task(self._playback_loop(session))
+        return {"run_id": session.run_id}
+
     async def state(self) -> dict[str, Any]:
         session = self._require_session()
         async with session.lock:
@@ -456,7 +475,9 @@ class RuntimeManager:
         return state
 
     async def harness_event(self, request: HarnessEventRequest) -> dict[str, Any]:
-        session = self._require_session()
+        if self.session is None:
+            return {"ok": True}
+        session = self.session
         result = await session.emit_harness(request)
         if request.type == "turn_finished":
             p = request.payload

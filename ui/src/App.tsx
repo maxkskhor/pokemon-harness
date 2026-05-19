@@ -308,6 +308,13 @@ export function App() {
 
   async function handleHarnessPlay() {
     if (!selectedHarnessId) return;
+    // Switch to live view so the user sees the active run, not a stale past run.
+    setViewedRunId(null);
+    const activeRunId = eventRunIdRef.current ?? state?.run_id ?? null;
+    if (activeRunId) {
+      void refreshTraces(activeRunId);
+      void refreshFrames(activeRunId);
+    }
     await runAction(() => playHarness(selectedHarnessId), false);
   }
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-05-19 (fix Stop/Play lifecycle)
+
+### Added
+- `env/runtime.py` — `pause_run()` pauses the emulator playback loop without destroying the session; `resume_run()` restarts it. Keeps run ID and game state intact across Stop/Play cycles.
+- `env/app.py` — `POST /api/run/pause` and `POST /api/run/resume` endpoints.
+- `harness/client.py` — `pause_run()` and `resume_run()` client methods.
+
+### Fixed
+- `harness/agent.py` — Stop command now calls `pause_run()` instead of `stop_run()`. The emulator session stays alive so the next Play resumes the same run (same run_id, continuing trace) instead of creating a new one.
+- `env/runtime.py` — `harness_event()` no longer returns 404 when there's no active session; lifecycle events emitted after stop are silently accepted.
+- `ui/src/App.tsx` — Clicking "Play agent" now switches the trace view to the live run, so the user is never left watching a past run while the agent is active.
+
 ## 2026-05-19 (fix stale Running status)
 
 ### Fixed

@@ -54,6 +54,12 @@ class PokemonEnvClient:
     def stop_run(self) -> dict[str, Any]:
         return self._post("/api/run/stop", None)
 
+    def pause_run(self) -> dict[str, Any]:
+        return self._post("/api/run/pause", None)
+
+    def resume_run(self) -> dict[str, Any]:
+        return self._post("/api/run/resume", None)
+
     def get_state(self) -> dict[str, Any]:
         return self._get("/api/state")
 

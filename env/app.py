@@ -101,6 +101,14 @@ def create_app(
     async def stop_run() -> dict[str, object]:
         return await manager.stop_run()
 
+    @api.post("/api/run/pause")
+    async def pause_run() -> dict[str, object]:
+        return await manager.pause_run()
+
+    @api.post("/api/run/resume")
+    async def resume_run() -> dict[str, object]:
+        return await manager.resume_run()
+
     @api.get("/api/state")
     async def state() -> dict[str, object]:
         return await manager.state()

@@ -340,7 +340,7 @@ class PokemonAgent:
                     run_thread.join(timeout=10)
                 run_thread = None
                 try:
-                    self._client.stop_run()
+                    self._client.pause_run()
                 except Exception:
                     pass
                 self._set_status("idle")
@@ -403,6 +403,10 @@ class PokemonAgent:
         if isinstance(active_run_id, str) and active_run_id:
             self._run_id = active_run_id
         self._turn_counter = self._count_existing_turns(self._run_id)
+        try:
+            self._client.resume_run()
+        except Exception:
+            pass
         self._emit_safe(
             "lifecycle",
             {
