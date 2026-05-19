@@ -89,11 +89,10 @@ Inside `run()`, the main helpers are:
 
 | Method | Description |
 |---|---|
-| `screenshot_bytes()` | Current frame as PNG bytes |
-| `screenshot(path)` | Save the current frame to a file |
-| `state()` | Current game state, including frame, map, position, party, and screen hash |
-| `press(button, frames=8)` | Press A / B / UP / DOWN / LEFT / RIGHT / START / SELECT |
-| `wait(frames)` | Advance the emulator by game frames |
+| `screenshot_bytes()` | Current game screen as PNG bytes |
+| `screenshot(path)` | Save the current game screen to a file |
+| `state()` | Current game state: map, position, party, screen hash |
+| `press(button)` | Press A / B / UP / DOWN / LEFT / RIGHT / START / SELECT |
 | `sequence(steps)` | Run button/wait steps as one atomic sequence |
 | `save_state(name)` | Save a run-local checkpoint |
 | `load_state(name)` | Load a run-local or shared checkpoint |

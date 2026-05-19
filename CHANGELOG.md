@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-05-19 (abstract frames from agent API)
+
+### Changed
+- `harness/agent.py` — `PokemonAgent.press(button)` no longer takes a `frames` parameter. Direction buttons automatically hold for 16 frames (full tile animation); action buttons hold for 8. Screenshots taken immediately after a move now always show the character settled on the new tile.
+- `harness/agent.py` — Removed `PokemonAgent.wait()`. It was frame-based and not needed in agent code.
+- `harness/client.py` — Module-level `press(button, frames=None)` auto-selects frame duration when called without `frames`; explicit frames still accepted for `scripts/setup.py` and sequence builders.
+- `harness/__init__.py` — `wait` removed from public exports; still importable from `harness.client` for low-level use.
+- `harness/examples/tool_agent.py` — `get_state` tool response no longer includes the `frame` counter.
+- `README.md`, `AGENTS.md` — Updated agent API reference to reflect removed `frames`/`wait` surface.
+
 ## 2026-05-19 (fix Stop/Play lifecycle)
 
 ### Added
