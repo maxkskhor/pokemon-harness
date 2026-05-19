@@ -22,15 +22,15 @@ for port in 8000 5173; do
 done
 
 cd "$ROOT_DIR"
-uv run uvicorn env.app:app --host 127.0.0.1 --port 8000 &
+uv run uvicorn env.app:app --host 127.0.0.1 --port 8000 >"$LOG_DIR/backend.log" 2>&1 &
 PIDS+=($!)
 
 cd "$ROOT_DIR/ui"
-npm run dev -- --host 127.0.0.1 --port 5173 &
+npm run dev -- --host 127.0.0.1 --port 5173 >"$LOG_DIR/frontend.log" 2>&1 &
 PIDS+=($!)
 
-echo "Backend:  http://127.0.0.1:8000"
-echo "Frontend: http://127.0.0.1:5173"
+echo "Backend:  http://127.0.0.1:8000  →  $LOG_DIR/backend.log"
+echo "Frontend: http://127.0.0.1:5173  →  $LOG_DIR/frontend.log"
 
 # Wait for backend to be ready before spawning agents.
 echo "Waiting for backend..."
@@ -46,7 +46,7 @@ if [ -f "$AGENTS_YAML" ]; then
     log_file="$LOG_DIR/${module##*.}.log"
     echo "Starting agent: $module  →  $log_file"
     cd "$ROOT_DIR"
-    uv run python -m "$module" >"$log_file" 2>&1 &
+    PYTHONUNBUFFERED=1 uv run python -m "$module" >"$log_file" 2>&1 &
     PIDS+=($!)
   done < <(cd "$ROOT_DIR" && uv run python -c "
 import yaml
