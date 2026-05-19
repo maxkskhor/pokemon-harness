@@ -16,6 +16,11 @@ trap cleanup EXIT
 
 mkdir -p "$LOG_DIR"
 
+# Kill any stale processes from a previous run on the ports we need.
+for port in 8000 5173; do
+  pids=$(lsof -ti :"$port" 2>/dev/null) && [ -n "$pids" ] && kill $pids 2>/dev/null || true
+done
+
 cd "$ROOT_DIR"
 uv run uvicorn env.app:app --host 127.0.0.1 --port 8000 &
 PIDS+=($!)
@@ -43,8 +48,8 @@ if [ -f "$AGENTS_YAML" ]; then
     cd "$ROOT_DIR"
     uv run python -m "$module" >"$log_file" 2>&1 &
     PIDS+=($!)
-  done < <(python3 -c "
-import yaml, sys
+  done < <(cd "$ROOT_DIR" && uv run python -c "
+import yaml
 with open('$AGENTS_YAML') as f:
     data = yaml.safe_load(f)
 for agent in data.get('agents', []):
