@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-05-19 (README visibility cleanup)
+
+### Added
+- `docs/architecture.md` — moved repository layout and provider-neutral API endpoint notes out of the README so public setup instructions stay focused.
+
+### Changed
+- `README.md` — rewrote the README around the developer evaluation path: concise project description, features, requirements, setup, launch, custom-agent example, LLM providers, useful commands, legal boundary, and license.
+- `README.md` — removed Codex-specific `UV_CACHE_DIR=/private/tmp/uv-cache` from public setup commands.
+- `README.md` — clarified platform expectations as macOS/Linux/WSL, with native Windows currently unverified.
+
 ## 2026-05-19 (UI cleanup: remove emulator controls, fix LLM filter, add screenshot toggle)
 
 ### Changed
