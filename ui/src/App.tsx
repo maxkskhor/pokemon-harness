@@ -21,9 +21,7 @@ import {
   saveState,
   screenshotUrl,
   setSpeed,
-  startRun,
   stopHarness,
-  stopRun,
   traceUrl,
   wsUrl,
 } from "./api";
@@ -37,7 +35,6 @@ import { NOISY_EVENT_TYPES, type FilterType } from "./trace/helpers";
 const speeds = ["paused", "1x", "5x", "max"];
 
 export function App() {
-  const [runId, setRunId] = useState("manual-run");
   const [state, setState] = useState<PokemonState | null>(null);
   const [events, setEvents] = useState<TraceEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +53,7 @@ export function App() {
   const [scrubPreviewFrame, setScrubPreviewFrame] = useState<number | null>(null);
   const viewedRunIdRef = useRef<string | null>(null);
   viewedRunIdRef.current = viewedRunId;
+  const [showImages, setShowImages] = useState(true);
   const [traceFilters, setTraceFilters] = useState<Record<FilterType, boolean>>({
     decision: true,
     llm: true,
@@ -288,28 +286,6 @@ export function App() {
     await refreshTraces(runId);
   }
 
-  async function handleStart() {
-    const id = state ? state.run_id : runId;
-    const next = await runAction(() => startRun(id), false);
-    if (next) {
-      setState(next);
-      eventRunIdRef.current = next.run_id;
-      await refreshTraces(next.run_id);
-      await refreshCheckpoints(next.run_id);
-      await refreshFrames(next.run_id);
-      setImageVersion((v) => v + 1);
-    }
-  }
-
-  async function handleStop() {
-    await runAction(() => stopRun(), false);
-    setState(null);
-    setRunStates([]);
-    setFrameNumbers([]);
-    setScrubSelectedFrame(null);
-    setScrubPreviewFrame(null);
-  }
-
   async function handleSaveCheckpoint() {
     if (!state) return;
     const name = (checkpointName.trim() || `chkpt-${state.frame}`).toLowerCase();
@@ -350,22 +326,6 @@ export function App() {
               <span>WebSocket {wsConnected ? "● connected" : "○ disconnected"}</span>
             </span>
           </div>
-          <div className="emulator-controls" aria-label="Emulator controls">
-            <span>Emulator</span>
-            <div className="run-controls">
-              {state ? (
-                <span className="active-run-pill" title={`Active run: ${state.run_id}`}>{state.run_id}</span>
-              ) : (
-                <input value={runId} onChange={(e) => setRunId(e.target.value)} aria-label="New run id" placeholder="run id" />
-              )}
-              <button onClick={handleStart} disabled={busy}>
-                <Play size={14} /> {state ? "Reset run" : "Start run"}
-              </button>
-              <button onClick={handleStop} disabled={busy || !state}>
-                <Square size={14} /> Stop run
-              </button>
-            </div>
-          </div>
         </header>
 
         {error ? <pre className="error">{error}</pre> : null}
@@ -396,12 +356,14 @@ export function App() {
 
         <section className="control-band">
           <div className="speed-controls">
+            <span className="speed-label">Emulator speed</span>
             {speeds.map((mode) => (
               <button
                 key={mode}
                 className={state?.speed_mode === mode ? "selected" : ""}
                 onClick={() => runAction(() => setSpeed(mode))}
                 disabled={!state || busy}
+                title={mode === "paused" ? "Freeze background; agent still acts" : `Run at ${mode}`}
               >
                 {mode === "paused" ? <Pause size={14} /> : null}{mode}
               </button>
@@ -413,11 +375,9 @@ export function App() {
           <Metric label="Run" value={state?.run_id ?? "-"} />
           <Metric label="Frame" value={state?.frame ?? "-"} />
           <Metric label="Speed" value={state?.speed_mode ?? "-"} />
-          <Metric label="ROM" value={state?.rom.filename ?? "-"} />
           <Metric label="Map" value={state?.pokemon.map_id ?? "-"} />
           <Metric label="X/Y" value={state ? `${state.pokemon.x ?? "-"} / ${state.pokemon.y ?? "-"}` : "-"} />
           <Metric label="Party" value={state?.pokemon.party_count ?? "-"} />
-          <Metric label="Symbols" value={state?.rom.symbols_loaded ? "loaded" : "missing"} />
         </section>
 
         <Checkpoints
@@ -481,7 +441,7 @@ export function App() {
               </button>
             </div>
           </div>
-          <TraceFilters filters={traceFilters} onChange={setTraceFilters} />
+          <TraceFilters filters={traceFilters} onChange={setTraceFilters} showImages={showImages} onToggleImages={setShowImages} />
           {selectedHarness && (
             <span className="harness-status" data-status={selectedHarness.status}>
               <Activity size={13} /> {selectedHarness.status}
@@ -496,6 +456,7 @@ export function App() {
           <TraceList
             events={events}
             filters={traceFilters}
+            showImages={showImages}
             isRunning={selectedHarness?.status === "running" || selectedHarness?.status === "starting"}
             autoScroll={scrubPreviewFrame == null}
             runStates={viewedRunId === null ? runStates : []}

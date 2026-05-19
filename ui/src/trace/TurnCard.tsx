@@ -1,7 +1,7 @@
 import { Bookmark, ChevronDown, ChevronRight, Clock, Gamepad2, MessageSquareText, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import { frameThumbnailUrl, type SavedState, type TraceEvent } from "../api";
-import { CATEGORY_ICON, eventCategory, eventLabel, formatPayload, payloadText, summarizeEvent } from "./helpers";
+import { CATEGORY_ICON, eventCategory, eventLabel, formatPayload, payloadText, summarizeEvent, type FilterType } from "./helpers";
 
 interface TurnSummary {
   turn_id: string;
@@ -128,12 +128,16 @@ function RawEventItem({ event }: { event: TraceEvent }) {
 export function TurnCard({
   turn_id,
   events,
+  filters,
+  showImages,
   runStates = [],
   onLoadCheckpoint,
   onSaveCheckpoint,
 }: {
   turn_id: string;
   events: TraceEvent[];
+  filters: Record<FilterType, boolean>;
+  showImages: boolean;
   runStates?: SavedState[];
   onLoadCheckpoint?: (name: string) => void;
   onSaveCheckpoint?: () => void;
@@ -154,14 +158,12 @@ export function TurnCard({
 
   const statusClass =
     s.status === "ok" ? "turn-status-ok" : s.status === "error" ? "turn-status-error" : "turn-status-running";
-  const showThumbnail = s.frame != null && !thumbnailFailed;
+  const showThumbnail = showImages && s.frame != null && !thumbnailFailed;
 
-  const rawCount = s.events.filter(
-    (e) => e.type !== "turn_started" && e.type !== "turn_finished",
-  ).length;
   const rawEvents = s.events.filter(
-    (e) => e.type !== "turn_started" && e.type !== "turn_finished",
+    (e) => e.type !== "turn_started" && e.type !== "turn_finished" && filters[eventCategory(e)],
   );
+  const rawCount = rawEvents.length;
 
   return (
     <li className="turn-card" data-status={s.status}>

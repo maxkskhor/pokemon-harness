@@ -5,9 +5,13 @@ import { filterTypes, type FilterType } from "./helpers";
 export function TraceFilters({
   filters,
   onChange,
+  showImages,
+  onToggleImages,
 }: {
   filters: Record<FilterType, boolean>;
   onChange: Dispatch<SetStateAction<Record<FilterType, boolean>>>;
+  showImages: boolean;
+  onToggleImages: (v: boolean) => void;
 }) {
   return (
     <div className="trace-filters" aria-label="Trace event filters">
@@ -24,6 +28,14 @@ export function TraceFilters({
           {type}
         </label>
       ))}
+      <label className={`trace-filter-divider ${showImages ? "selected" : ""}`}>
+        <input
+          type="checkbox"
+          checked={showImages}
+          onChange={(e) => onToggleImages(e.currentTarget.checked)}
+        />
+        screenshots
+      </label>
     </div>
   );
 }

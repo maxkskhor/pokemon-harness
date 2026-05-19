@@ -264,7 +264,14 @@ select {
 .speed-controls {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 5px;
+}
+
+.speed-label {
+  font-size: 11px;
+  color: #8a9a87;
+  margin-right: 2px;
 }
 
 .speed-controls button.selected {
@@ -513,6 +520,12 @@ select {
 
 .trace-filters input {
   min-height: 0;
+}
+
+.trace-filter-divider {
+  margin-left: 4px;
+  border-left: 1px solid #d7ddcf;
+  padding-left: 8px;
 }
 
 .harness-status {

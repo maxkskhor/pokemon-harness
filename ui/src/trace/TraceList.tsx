@@ -17,6 +17,7 @@ import {
 export function TraceList({
   events,
   filters,
+  showImages,
   isRunning,
   autoScroll,
   runStates = [],
@@ -25,6 +26,7 @@ export function TraceList({
 }: {
   events: TraceEvent[];
   filters: Record<FilterType, boolean>;
+  showImages: boolean;
   isRunning: boolean;
   autoScroll: boolean;
   runStates?: SavedState[];
@@ -84,13 +86,15 @@ export function TraceList({
           key={turn_id}
           turn_id={turn_id}
           events={turnEventMap.get(turn_id) ?? []}
+          filters={filters}
+          showImages={showImages}
           runStates={runStates}
           onLoadCheckpoint={onLoadCheckpoint}
           onSaveCheckpoint={onSaveCheckpoint}
         />
       ))}
       {hasSession && (
-        <SessionGroup events={sessionEvents} deltas={deltas} />
+        <SessionGroup events={sessionEvents} deltas={deltas} showImages={showImages} />
       )}
       {isRunning ? (
         <li className="trace-item trace-waiting">
@@ -105,9 +109,11 @@ export function TraceList({
 function SessionGroup({
   events,
   deltas,
+  showImages,
 }: {
   events: TraceEvent[];
   deltas: Map<TraceEvent, string>;
+  showImages: boolean;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   return (
@@ -124,6 +130,7 @@ function SessionGroup({
               key={`${event.timestamp}-${event.type}-${index}`}
               event={event}
               delta={deltas.get(event) ?? "+0.0 s"}
+              showImages={showImages}
             />
           ))}
         </ol>
@@ -181,7 +188,7 @@ function LlmCallDetails({ payload }: { payload: Record<string, unknown> }) {
   );
 }
 
-function TraceItem({ event, delta }: { event: TraceEvent; delta: string }) {
+function TraceItem({ event, delta, showImages }: { event: TraceEvent; delta: string; showImages: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const [reasoningExpanded, setReasoningExpanded] = useState(false);
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
@@ -189,7 +196,7 @@ function TraceItem({ event, delta }: { event: TraceEvent; delta: string }) {
   const reasoning = payloadText(event.payload, ["reasoning", "thought", "thinking", "raw_thought"]);
   const category = eventCategory(event);
   const Icon = CATEGORY_ICON[category] ?? MessageSquareText;
-  const showThumbnail = event.frame != null && !thumbnailFailed;
+  const showThumbnail = showImages && event.frame != null && !thumbnailFailed;
   return (
     <li className="trace-item" data-tone={category} data-source={event.source}>
       <button className="trace-head" onClick={() => setExpanded((value) => !value)}>

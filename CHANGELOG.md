@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-05-19 (UI cleanup: remove emulator controls, fix LLM filter, add screenshot toggle)
+
+### Changed
+- `ui/src/App.tsx` — removed emulator "Reset run" / "Stop run" buttons from header (runs are started by the agent harness process); removed ROM and Symbols from status bar; added "Emulator speed" label with tooltip on "paused"; added `showImages` state passed to trace components.
+- `ui/src/trace/TraceFilters.tsx` — added "screenshots" toggle to show/hide thumbnails in the trace.
+- `ui/src/trace/TraceList.tsx` — passes `filters` and `showImages` to `TurnCard`; `TraceItem` and `SessionGroup` respect `showImages` for thumbnail display.
+- `ui/src/trace/TurnCard.tsx` — applies event filters to the expandable raw-events list (fixes LLM filter not affecting turn events); respects `showImages` toggle for turn thumbnails.
+- `ui/src/styles.css` — added `.speed-label` for the speed controls label; `.trace-filter-divider` for the screenshots toggle separator.
+
+### Fixed
+- LLM filter checkbox now hides/shows `llm_call` events inside expanded TurnCard raw event lists (previously only affected session-level events).
+
 ## 2026-05-19 (turn-context observability + run metadata)
 
 ### Added
