@@ -269,10 +269,11 @@ class PokemonAgent:
     def _ws_loop(self) -> None:
         """Holds a long-lived WebSocket to the backend and pushes commands onto _cmd_queue.
 
-        On disconnect, reconnects with exponential backoff. If the backend doesn't
-        support the WS endpoint at all (404), falls back to HTTP polling — slower
-        but functionally identical, so older backends keep working.
+        On disconnect, reconnects with exponential backoff.
         """
+        from websockets.sync.client import connect as ws_connect
+        from websockets.exceptions import ConnectionClosed, InvalidStatus
+
         ws_base = self._base_url
         if ws_base.startswith("https://"):
             ws_base = "wss://" + ws_base[len("https://"):]
@@ -281,21 +282,10 @@ class PokemonAgent:
         url = f"{ws_base.rstrip('/')}/api/harness/{self._harness_id}/control"
 
         backoff = 0.5
-        fallback_to_poll = False
-
-        try:
-            from websockets.sync.client import connect as ws_connect
-            from websockets.exceptions import ConnectionClosed, InvalidStatus
-        except ImportError:
-            logger.warning("websockets library not available; falling back to HTTP poll")
-            self._http_poll_loop()
-            return
-
         while not self._shutdown_event.is_set():
             try:
                 with ws_connect(url, open_timeout=5, close_timeout=2) as ws:
                     backoff = 0.5
-                    fallback_to_poll = False
                     while not self._shutdown_event.is_set():
                         try:
                             message = ws.recv(timeout=1.0)
@@ -313,32 +303,13 @@ class PokemonAgent:
                 if self._shutdown_event.is_set():
                     return
             except InvalidStatus as exc:
-                # 404 = backend doesn't support the WS endpoint yet → fall back.
-                if not fallback_to_poll and getattr(exc.response, "status_code", None) == 404:
-                    logger.info("control WS not supported by backend; falling back to HTTP poll")
-                    fallback_to_poll = True
-                    self._http_poll_loop()
-                    return
                 logger.warning("control WS rejected: %s", exc)
-            except Exception as exc:  # pragma: no cover — network errors are flaky
+            except Exception as exc:
                 logger.warning("control WS error: %s", exc)
             if self._shutdown_event.is_set():
                 return
             time.sleep(min(backoff, 5.0))
             backoff = min(backoff * 2, 5.0)
-
-    def _http_poll_loop(self) -> None:
-        """Compatibility fallback that polls the legacy /poll endpoint at 500 ms."""
-        while not self._shutdown_event.is_set():
-            try:
-                resp = self._client._get(f"/api/harness/{self._harness_id}/poll")
-                cmd = resp.get("command")
-            except Exception:
-                time.sleep(1)
-                continue
-            if cmd:
-                self._cmd_queue.put(cmd)
-            time.sleep(0.5)
 
     def _control_loop(self) -> None:
         run_thread: threading.Thread | None = None

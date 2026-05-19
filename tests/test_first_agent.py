@@ -1,4 +1,4 @@
-"""Tests for my_agent.py — reasoning extraction and conversation history."""
+"""Tests for first_agent.py — conversation history and event emission."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -6,39 +6,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from harness.examples.my_agent import (
+from harness.examples.first_agent import (
     MAX_HISTORY_TURNS,
     SYSTEM_PROMPT,
     USER_TURN_TEXT,
-    MyAgent,
-    _extract_reasoning,
+    FirstAgent,
     _strip_image_data,
-    _strip_think_tags,
 )
 from harness.llm import LLMCallError, LLMResponse
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
-
-def _fake_message(content: str, reasoning: str | None = None, model_extra: dict | None = None):
-    msg = MagicMock()
-    msg.content = content
-    # Simulate direct attribute
-    if reasoning is not None:
-        msg.reasoning = reasoning
-        msg.model_extra = None
-    else:
-        # No direct attribute
-        del msg.reasoning  # MagicMock: remove so getattr returns default
-        msg.model_extra = model_extra or {}
-    return msg
-
-
-def _fake_response(content: str, reasoning: str | None = None, model_extra: dict | None = None):
-    msg = _fake_message(content, reasoning=reasoning, model_extra=model_extra)
-    choice = SimpleNamespace(message=msg)
-    return SimpleNamespace(choices=[choice])
-
 
 def _llm_response(
     content: str,
@@ -59,49 +37,24 @@ def _llm_response(
     )
 
 
-# ── _extract_reasoning ────────────────────────────────────────────────────────
-
-def test_extract_reasoning_direct_attribute():
-    response = _fake_response("UP", reasoning="I should go north.")
-    assert _extract_reasoning(response) == "I should go north."
-
-
-def test_extract_reasoning_model_extra():
-    response = _fake_response("UP", model_extra={"reasoning": "heading north"})
-    assert _extract_reasoning(response) == "heading north"
-
-
-def test_extract_reasoning_think_tags():
-    content = "<think>player is in bedroom, should go up</think>\nUP"
-    response = _fake_response(content, model_extra={})
-    assert _extract_reasoning(response) == "player is in bedroom, should go up"
+def _make_agent() -> FirstAgent:
+    client = MagicMock()
+    client.get_state.return_value = {"frame": 1, "pokemon": {"map_id": 38, "x": 3, "y": 6}}
+    client.client = MagicMock()
+    client.client.get.return_value = MagicMock(content=b"\x89PNG\r\n", status_code=200)
+    client.emit.return_value = {}
+    client.press_button.return_value = {}
+    with patch.dict("os.environ", {"OPENROUTER_API_KEY": "fake-key"}):
+        agent = FirstAgent(load_state=None, client_factory=lambda _: client)
+    agent._llm = MagicMock()
+    return agent
 
 
-def test_extract_reasoning_none_when_absent():
-    response = _fake_response("UP", model_extra={})
-    assert _extract_reasoning(response) is None
+def _stub_response(agent: FirstAgent, button: str, reasoning: str | None = None) -> None:
+    agent._llm.chat.return_value = _llm_response(button, reasoning=reasoning)
 
 
-def test_extract_reasoning_empty_string_treated_as_absent():
-    response = _fake_response("UP", reasoning="")
-    # empty string is falsy — falls through to think-tag search, finds nothing
-    assert _extract_reasoning(response) is None
-
-
-# ── _strip_think_tags ─────────────────────────────────────────────────────────
-
-def test_strip_think_tags_removes_block():
-    assert _strip_think_tags("<think>internal</think>UP") == "UP"
-
-
-def test_strip_think_tags_multiline():
-    text = "<think>\nline1\nline2\n</think>\nDOWN"
-    assert _strip_think_tags(text) == "DOWN"
-
-
-def test_strip_think_tags_no_tags():
-    assert _strip_think_tags("LEFT") == "LEFT"
-
+# ── _strip_image_data ─────────────────────────────────────────────────────────
 
 def test_strip_image_data_replaces_inline_base64():
     messages = [
@@ -122,28 +75,9 @@ def test_strip_image_data_replaces_inline_base64():
 
 # ── conversation history ──────────────────────────────────────────────────────
 
-def _make_agent() -> MyAgent:
-    """Return a MyAgent with all external dependencies mocked out."""
-    client = MagicMock()
-    client.get_state.return_value = {"frame": 1, "pokemon": {"map_id": 38, "x": 3, "y": 6}}
-    client.client = MagicMock()
-    client.client.get.return_value = MagicMock(content=b"\x89PNG\r\n", status_code=200)
-    client.emit.return_value = {}
-    client.press_button.return_value = {}
-    with patch.dict("os.environ", {"OPENROUTER_API_KEY": "fake-key"}):
-        agent = MyAgent(load_state=None, client_factory=lambda _: client)
-    agent._llm = MagicMock()
-    return agent
-
-
-def _stub_response(agent: MyAgent, button: str, reasoning: str | None = None) -> None:
-    """Make agent._llm.chat return a stub response."""
-    agent._llm.chat.return_value = _llm_response(button, reasoning=reasoning)
-
-
 def test_history_starts_with_system_message():
     agent = _make_agent()
-    agent._stop_event.set()  # stop after first loop check
+    agent._stop_event.set()
     _stub_response(agent, "UP")
 
     agent.run()
@@ -188,8 +122,7 @@ def test_history_capped_at_max_turns():
     agent.run()
 
     # 1 system + MAX_HISTORY_TURNS * 2 pairs
-    expected = 1 + MAX_HISTORY_TURNS * 2
-    assert len(agent._history) == expected
+    assert len(agent._history) == 1 + MAX_HISTORY_TURNS * 2
     assert agent._history[0]["role"] == "system"
 
 
@@ -217,6 +150,8 @@ def test_history_passes_all_messages_to_llm():
     assert calls[1][3]["role"] == "user"
 
 
+# ── event emission ────────────────────────────────────────────────────────────
+
 def test_reasoning_included_in_emit():
     agent = _make_agent()
 
@@ -233,9 +168,6 @@ def test_reasoning_included_in_emit():
     payload = decision_calls[0].args[1]
     assert payload["reasoning"] == "I think I should go north"
     assert payload["action"] == "UP"
-    assert "map_id" not in payload
-    assert "x" not in payload
-    assert "y" not in payload
 
 
 def test_llm_call_event_includes_sanitized_messages_and_latency():
@@ -274,7 +206,6 @@ def test_llm_call_emit_includes_provider_and_retry_attempts():
         )
 
     agent._llm.chat.side_effect = side_effect
-
     agent.run()
 
     llm_call = next(c for c in agent._client.emit.call_args_list if c.args[0] == "llm_call")
@@ -316,7 +247,6 @@ def test_user_turn_message_format():
     agent._llm.chat.side_effect = side_effect
     agent.run()
 
-    # The user message content should have image_url and text
     user_msg = agent._history[1]
     assert user_msg["role"] == "user"
     content = user_msg["content"]

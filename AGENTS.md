@@ -94,7 +94,7 @@ After completing any meaningful work, append an entry to `CHANGELOG.md`. Group b
 
 ## LLM agent prompting
 
-Models default to pressing A when given a vague prompt. To get movement, explicitly tell the model to prefer direction buttons and only press A for dialogue/menus. See `harness/examples/my_agent.py` for the working prompt.
+Models default to pressing A when given a vague prompt. To get movement, explicitly tell the model to prefer direction buttons and only press A for dialogue/menus. See `harness/examples/first_agent.py` for the working prompt.
 
 `response.choices[0].message.content` can be `None` for some model responses (e.g. thinking-mode outputs). Always guard with `or ""`:
 ```python
@@ -103,7 +103,7 @@ raw = (response.choices[0].message.content or "").strip()
 
 ## Harness lifecycle
 
-- Each `MyAgent()` instance gets a fixed `run_id` (set in `__init__`). Re-playing the same harness reuses the same run_id — the UI trace list appends rather than clearing.
+- Each `FirstAgent()` instance gets a fixed `run_id` (set in `__init__`). Re-playing the same harness reuses the same run_id — the UI trace list appends rather than clearing.
 - Stale harness registrations (`status="stopping"` that never resolves) are from dead processes. Select a different entry in the dropdown with `status="idle"`.
 - After a harness errors, `_run_wrapped` sets status to "error" then "idle". The control loop keeps running — click Play again to restart without restarting the process.
 
@@ -143,7 +143,7 @@ Turn IDs are auto-generated as `turn-001`, `turn-002`, etc. and reset to 0 when 
 
 To expose agent and model info in meta.json, set class attributes before calling `serve()`:
 ```python
-class MyAgent(PokemonAgent):
-    name = "My Agent"
+class FirstAgent(PokemonAgent):
+    name = "First Agent"
     model = "qwen/qwen3-6b-flash"
 ```

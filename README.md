@@ -51,7 +51,7 @@ scripts/dev.sh
 In another terminal, start the example agent:
 
 ```bash
-uv run python -m harness.examples.my_agent
+uv run python -m harness.examples.first_agent
 ```
 
 Open `http://localhost:5173`, select the agent from the harness dropdown, and click **Play**.
@@ -63,8 +63,8 @@ Create a subclass of `PokemonAgent`, set a name, and implement `run()`:
 ```python
 from harness import PokemonAgent
 
-class MyAgent(PokemonAgent):
-    name = "My Agent"
+class FirstAgent(PokemonAgent):
+    name = "First Agent"
 
     def run(self) -> None:
         while not self.should_stop():
@@ -76,10 +76,10 @@ class MyAgent(PokemonAgent):
             self.press("RIGHT")
 
 if __name__ == "__main__":
-    MyAgent().serve()
+    FirstAgent().serve()
 ```
 
-A fuller working template is in `harness/examples/my_agent.py`.
+A fuller working template is in `harness/examples/first_agent.py`.
 
 Inside `run()`, the main helpers are:
 

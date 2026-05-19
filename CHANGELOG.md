@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-05-19 (rename my_agent → first_agent)
+
+### Changed
+- `harness/examples/my_agent.py` → `harness/examples/first_agent.py`; class `MyAgent` → `FirstAgent`; `name = "First Agent"`.
+- `tests/test_my_agent.py` → `tests/test_first_agent.py`; removed tests for `_extract_reasoning` / `_strip_think_tags` (those are `harness.llm` internals, not part of the agent interface).
+- `README.md`, `AGENTS.md` — updated all references.
+
+## 2026-05-19 (trace cleanup and harness simplification)
+
+### Fixed
+- `ui/src/styles.css` — turn cards were crushed to 2px height by the flex algorithm (`.trace-list` is a flex column; `.turn-card` lacked `flex-shrink: 0` so all cards compressed to just their 1px border on each side). Added `flex-shrink: 0` to make cards their natural height.
+- `harness/examples/my_agent.py` — agent was manually constructing `turn_id` strings and passing them to `emit()` directly instead of using `with self.turn()`. This meant no `turn_started`/`turn_finished` events were emitted (all turns showed "running" forever), and `press()` was called outside the turn context so `button_press` env events had no `turn_id` and landed in the Session group. Rewrote `run()` to use `with self.turn(goal=...)` so all three are fixed: proper status, elapsed time, goal text, and button_press events grouped inside their turn cards.
+
+### Removed
+- `harness/agent.py` — removed `_http_poll_loop()` and the 404-fallback logic from `_ws_loop()` that existed for older backends without WebSocket support.
+- `runs/` — deleted all accumulated trace runs; start fresh.
+
 ## 2026-05-19 (one-command setup)
 
 ### Added

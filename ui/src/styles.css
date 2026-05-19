@@ -1005,6 +1005,7 @@ select {
   border-radius: 8px;
   background: #f6f8fd;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .turn-card[data-status="error"] {
