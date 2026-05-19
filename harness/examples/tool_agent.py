@@ -39,8 +39,6 @@ SYSTEM_PROMPT = (
     "  get_state()          — read your current position (x, y, map_id) and frame\n"
     "  move(direction, steps) — walk N tiles; returns new position so you can verify movement\n"
     "  press_button(button) — press A to talk/confirm, B to cancel, UP/DOWN to navigate menus\n\n"
-    "Strategy: the bedroom exit (stairs) is in the lower-left area of the map. "
-    "Move DOWN and LEFT to find it. If you don't move after a step, you hit a wall — try another direction. "
     "Press A when a dialogue box is open."
 )
 
@@ -71,7 +69,7 @@ TOOLS: list[dict[str, Any]] = [
                     },
                     "steps": {
                         "type": "integer",
-                        "description": "Number of tiles to walk (1–10).",
+                        "description": "Number of tiles to walk (1-10).",
                         "minimum": 1,
                         "maximum": 10,
                     },
