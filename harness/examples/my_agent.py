@@ -2,8 +2,8 @@
 Pokemon agent using OpenRouter (vision LLM).
 
 Setup:
-  1. scripts/dev.sh                          # start backend + UI
-  2. uv run python scripts/setup_bedroom.py  # create bedroom save state (run once)
+  1. scripts/setup.sh                        # first-time setup
+  2. scripts/dev.sh                          # start backend + UI
 
 Add your OpenRouter key to .env:
   OPENROUTER_API_KEY=sk-or-...

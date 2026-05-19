@@ -32,34 +32,13 @@ brew install rgbds
 
 On Linux or WSL, install RGBDS through your package manager or from the RGBDS project instructions.
 
-Install Python and UI dependencies:
+Run the project setup:
 
 ```bash
-uv sync --dev
-cd ui
-npm install
-cd ..
+scripts/setup.sh
 ```
 
-Build local ROM-compatible binaries:
-
-```bash
-scripts/setup_pokered.sh
-```
-
-Create the default bedroom save state:
-
-```bash
-scripts/dev.sh
-```
-
-In another terminal:
-
-```bash
-uv run python scripts/setup_bedroom.py
-```
-
-`setup_bedroom.py` expects the backend from `scripts/dev.sh` to be running.
+This installs Python/UI dependencies, builds local ROM-compatible binaries, starts a temporary backend, and creates the default bedroom save state.
 
 ## Launch
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-05-19 (one-command setup)
+
+### Added
+- `scripts/setup.sh` — added a first-time setup wrapper that installs Python/UI dependencies, builds local ROM artifacts, starts a temporary backend if needed, and creates the default `bedroom` save state.
+- `scripts/setup.py` — moved the bedroom-state automation behind the setup command as an internal helper.
+
+### Changed
+- `README.md` — replaced the separate dependency, ROM build, backend start, and bedroom setup steps with `scripts/setup.sh`.
+- `harness/examples/my_agent.py` — updated the usage comment to point first-time users at `scripts/setup.sh`.
+
+### Removed
+- `scripts/setup_bedroom.py` — removed the standalone bedroom setup entry point so first-time setup has one public command.
+
 ## 2026-05-19 (README visibility cleanup)
 
 ### Added

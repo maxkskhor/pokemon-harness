@@ -1,19 +1,6 @@
-"""
-Create the 'bedroom' save state: boots the game, names the character RED,
-names the rival BLUE, and saves state with Red standing freely in the bedroom.
-
-Run once after building the ROM:
-  uv run python scripts/setup_bedroom.py
-
-The backend must already be running (scripts/dev.sh).
-
-Timing notes (all values are game frames at 60 fps):
-  - Oak's intro has 13 dialogue boxes before the player naming screen
-  - Post-player-naming has 6 dialogue boxes before the rival naming screen
-  - wait(300) before pressing DOWN ensures the ignore-input timer expires
-    after the naming screen opens, so the cursor move is accepted
-"""
 from __future__ import annotations
+
+import argparse
 
 from harness.client import PokemonEnvClient, press, wait
 
@@ -38,14 +25,11 @@ INTRO_STEPS = [
     press("A", 12), wait(200),
     press("A", 12), wait(300),  # 13th press; naming preset screen now open
 
-    # Choose preset player name RED
-    # Cursor starts on NEW NAME; one DOWN moves to RED
+    # Choose preset player name RED. Cursor starts on NEW NAME; one DOWN moves to RED.
     press("DOWN", 12), wait(200),
     press("A", 12), wait(400),
 
-    # Advance through the 6 post-naming dialogue boxes
-    # (5 boxes bring us to "Erm, what is his name again?";
-    #  the 6th press closes that box and opens the rival naming screen)
+    # Advance through the 6 post-naming dialogue boxes.
     press("A", 12), wait(200),
     press("A", 12), wait(200),
     press("A", 12), wait(200),
@@ -53,8 +37,7 @@ INTRO_STEPS = [
     press("A", 12), wait(200),
     press("A", 12), wait(300),  # 6th press; rival naming preset screen now open
 
-    # Choose preset rival name BLUE
-    # Cursor starts on NEW NAME; one DOWN moves to BLUE
+    # Choose preset rival name BLUE. Cursor starts on NEW NAME; one DOWN moves to BLUE.
     press("DOWN", 12), wait(200),
     press("A", 12), wait(400),
 
@@ -85,16 +68,14 @@ def _can_move(client: PokemonEnvClient) -> bool:
         client.press_sequence([press(btn, 20), wait(60)])
         after = client.get_state().get("pokemon", {})
         if after.get("x") != bx or after.get("y") != by:
-            # Undo the move
             opposite = {"RIGHT": "LEFT", "LEFT": "RIGHT", "DOWN": "UP", "UP": "DOWN"}[btn]
             client.press_sequence([press(opposite, 20), wait(60)])
             return True
     return False
 
 
-def main() -> None:
+def create_bedroom_state() -> None:
     print("Setting up 'bedroom' save state...")
-    print("The backend must be running (scripts/dev.sh).")
     client = PokemonEnvClient()
     try:
         client.wait_for_server(timeout=20)
@@ -104,7 +85,6 @@ def main() -> None:
         client.press_sequence(INTRO_STEPS)
         client.set_speed("paused")
 
-        # Verify Red is free-roaming; press A up to 20 more times if still in dialogue
         print("Verifying free-roaming movement...")
         for attempt in range(20):
             if _can_move(client):
@@ -112,19 +92,29 @@ def main() -> None:
                 break
             client.press_sequence([press("A", 12), wait(150)])
         else:
-            print("WARNING: could not verify movement after 20 attempts — saving anyway")
+            print("WARNING: could not verify movement after 20 attempts; saving anyway")
 
         client.save_state("bedroom")
         state = client.get_state()
         pokemon = state.get("pokemon", {})
         print(
-            f"Saved 'bedroom' at frame {state['frame']} — "
+            f"Saved 'bedroom' at frame {state['frame']} - "
             f"map={pokemon.get('map_id')} x={pokemon.get('x')} y={pokemon.get('y')}"
         )
         client.stop_run()
-        print("Done. Harnesses will now load this state automatically on Play.")
     finally:
         client.close()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Internal setup helpers for pokemon-harness.")
+    parser.add_argument("--create-bedroom-state", action="store_true")
+    args = parser.parse_args()
+
+    if args.create_bedroom_state:
+        create_bedroom_state()
+    else:
+        parser.error("choose a setup action")
 
 
 if __name__ == "__main__":
