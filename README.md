@@ -44,19 +44,21 @@ This installs Python/UI dependencies, builds local ROM-compatible binaries, star
 
 ## Launch
 
-Start the backend and UI:
-
 ```bash
 scripts/dev.sh
 ```
 
-In another terminal, start the example agent:
+This starts the backend, UI, and all agents listed in `agents.yaml`. Open `http://localhost:5173`, select an agent from the harness dropdown, and click **Play**.
 
-```bash
-uv run python -m harness.examples.first_agent
+Agent stdout/stderr is written to `logs/<agent>.log`.
+
+To add or remove agents, edit `agents.yaml`:
+
+```yaml
+agents:
+  - name: my_agent
+    module: harness.examples.my_agent
 ```
-
-Open `http://localhost:5173`, select the agent from the harness dropdown, and click **Play**.
 
 ## Build Your Own Agent
 

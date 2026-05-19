@@ -2,14 +2,9 @@
 Minimal working Pokemon agent — the first example for the harness gym interface.
 
 Setup:
-  1. scripts/setup.sh                        # first-time setup
-  2. scripts/dev.sh                          # start backend + UI
-
-Add your OpenRouter key to .env:
-  OPENROUTER_API_KEY=sk-or-...
-
-Run:
-  uv run python -m harness.examples.first_agent
+  1. scripts/setup.sh        # first-time setup
+  2. Add OPENROUTER_API_KEY to .env
+  3. scripts/dev.sh          # starts backend, UI, and all agents in agents.yaml
 """
 from __future__ import annotations
 
