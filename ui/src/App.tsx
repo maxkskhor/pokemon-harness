@@ -391,6 +391,7 @@ export function App() {
           <Metric label="Map" value={state?.pokemon.map_id ?? "-"} />
           <Metric label="X/Y" value={state ? `${state.pokemon.x ?? "-"} / ${state.pokemon.y ?? "-"}` : "-"} />
           <Metric label="Party" value={state?.pokemon.party_count ?? "-"} />
+          <Metric label="Spend" value={runCostDisplay(events)} />
         </section>
 
         <Checkpoints
@@ -487,6 +488,23 @@ export function App() {
       </aside>
     </main>
   );
+}
+
+function runCostDisplay(events: TraceEvent[]): string {
+  // Walk events in reverse to find the latest run_cost_usd
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.type === "budget_exceeded") {
+      const cost = (e.payload as Record<string, unknown>).run_cost_usd;
+      if (typeof cost === "number") return `$${cost.toFixed(3)} LIMIT`;
+    }
+    if (e.type === "llm_call") {
+      const usage = (e.payload as Record<string, unknown>).usage as Record<string, unknown> | undefined;
+      const cost = usage?.run_cost_usd;
+      if (typeof cost === "number") return `$${cost.toFixed(3)}`;
+    }
+  }
+  return "-";
 }
 
 function Metric({ label, value }: { label: string; value: string | number }) {

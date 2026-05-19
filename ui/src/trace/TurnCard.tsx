@@ -18,6 +18,7 @@ interface TurnSummary {
   llm_model: string | null;
   llm_tokens: number | null;
   llm_latency_ms: number | null;
+  llm_cost_usd: number | null;
   reasoning: string | null;
 }
 
@@ -75,6 +76,7 @@ function buildTurnSummary(turn_id: string, events: TraceEvent[]): TurnSummary {
   const llm_model = llmEvent ? ((llmEvent.payload.model as string) ?? null) : null;
   const llm_tokens = usage ? ((usage.total_tokens as number) ?? null) : null;
   const llm_latency_ms = usage ? ((usage.latency_ms as number) ?? null) : null;
+  const llm_cost_usd = usage ? ((usage.cost_usd as number) ?? null) : null;
 
   const reasoning =
     decisionEvent
@@ -98,6 +100,7 @@ function buildTurnSummary(turn_id: string, events: TraceEvent[]): TurnSummary {
     llm_model,
     llm_tokens,
     llm_latency_ms,
+    llm_cost_usd,
     reasoning,
   };
 }
@@ -218,13 +221,14 @@ export function TurnCard({
           {s.position_delta && (
             <p className="turn-card-row turn-card-position">{s.position_delta}</p>
           )}
-          {(s.llm_model || s.llm_tokens != null || s.llm_latency_ms != null) && (
+          {(s.llm_model || s.llm_tokens != null || s.llm_latency_ms != null || s.llm_cost_usd != null) && (
             <p className="turn-card-row turn-card-llm">
               <MessageSquareText size={12} />
               {[
                 s.llm_model,
                 s.llm_tokens != null ? `${s.llm_tokens} tokens` : null,
                 s.llm_latency_ms != null ? `${s.llm_latency_ms}ms` : null,
+                s.llm_cost_usd != null ? `$${s.llm_cost_usd.toFixed(4)}` : null,
               ]
                 .filter(Boolean)
                 .join(" · ")}
