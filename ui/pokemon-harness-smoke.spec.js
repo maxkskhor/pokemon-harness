@@ -75,6 +75,62 @@ test("trace filter checkboxes toggle correctly including screenshots", async ({ 
   expect(errors).toEqual([]);
 });
 
+test("status grid shows agent fields and omits ROM and Symbols", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("http://127.0.0.1:5173/", { waitUntil: "domcontentloaded" });
+
+  const grid = page.locator(".state-grid");
+  await expect(grid).toBeVisible();
+
+  // Agent-relevant fields must be present
+  for (const label of ["Frame", "Map", "X/Y", "Party", "Speed"]) {
+    await expect(grid.getByText(label, { exact: true })).toBeVisible();
+  }
+
+  // Scaffold-only fields must be absent
+  await expect(grid.getByText("ROM", { exact: true })).not.toBeVisible();
+  await expect(grid.getByText("Symbols", { exact: true })).not.toBeVisible();
+});
+
+test("paused speed button tooltip explains it does not stop the agent", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("http://127.0.0.1:5173/", { waitUntil: "domcontentloaded" });
+
+  const tooltip = await page.getByRole("button", { name: /paused/ }).getAttribute("title");
+  expect(tooltip).toBeTruthy();
+  expect(tooltip.toLowerCase()).toContain("agent");
+});
+
+test("screenshots toggle actually hides trace thumbnails when a run is active", async ({ page }) => {
+  const runId = `smoke-thumb-${Date.now()}`;
+  try {
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    await page.request.post("http://127.0.0.1:8000/api/run/start", { data: { run_id: runId } });
+    // Advance emulator a few frames so at least one env event with a frame number is emitted
+    await page.request.post("http://127.0.0.1:8000/api/action/press", { data: { button: "A", frames: 8 } });
+
+    await page.goto("http://127.0.0.1:5173/", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("img.game-screen")).toBeVisible({ timeout: 5000 });
+
+    // Wait for at least one thumbnail to appear in the trace
+    await expect(page.locator(".trace-thumbnail")).toBeVisible({ timeout: 5000 });
+
+    // Toggle screenshots off — all thumbnails should disappear
+    const screenshotsLabel = page.getByLabel("Trace event filters").locator("label").filter({ hasText: "screenshots" });
+    await screenshotsLabel.click();
+    await expect(page.locator(".trace-thumbnail")).not.toBeVisible();
+
+    // Toggle back on — thumbnails should reappear
+    await screenshotsLabel.click();
+    await expect(page.locator(".trace-thumbnail")).toBeVisible();
+  } finally {
+    await page.request.post("http://127.0.0.1:8000/api/run/stop").catch(() => {});
+    rmSync(resolve("..", "runs", runId), { recursive: true, force: true });
+    rmSync(resolve("..", "states", runId), { recursive: true, force: true });
+  }
+});
+
 test("emulator speed controls are labeled and functional without start-run button", async ({ page }) => {
   const errors = [];
   page.on("console", (message) => {
