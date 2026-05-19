@@ -9,11 +9,10 @@ The model has three tools:
 Within each harness turn the agent runs a tool-call loop: the model can call multiple
 tools and see results before ending the turn, so it can react to position feedback.
 
-Add your OpenRouter key to .env:
-  OPENROUTER_API_KEY=sk-or-...
-
-Run:
-  uv run python -m harness.examples.tool_agent
+Setup:
+  1. scripts/setup.sh        # first-time setup
+  2. Add OPENROUTER_API_KEY to .env
+  3. scripts/dev.sh          # starts backend, UI, and all agents in agents.yaml
 """
 from __future__ import annotations
 
