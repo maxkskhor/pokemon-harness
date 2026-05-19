@@ -34,8 +34,17 @@ export function TraceList({
   onSaveCheckpoint?: () => void;
 }) {
   const listRef = useRef<HTMLOListElement | null>(null);
+  const atBottomRef = useRef(true);
+
+  // Track whether the user is near the bottom
+  function handleScroll() {
+    const el = listRef.current;
+    if (!el) return;
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }
+
   useEffect(() => {
-    if (autoScroll) {
+    if (autoScroll && atBottomRef.current) {
       listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
     }
   }, [events.length, isRunning, autoScroll]);
@@ -80,7 +89,7 @@ export function TraceList({
   });
 
   return (
-    <ol className="trace-list" ref={listRef}>
+    <ol className="trace-list" ref={listRef} onScroll={handleScroll}>
       {turnIds.map((turn_id) => (
         <TurnCard
           key={turn_id}
