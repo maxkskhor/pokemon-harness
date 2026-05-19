@@ -33,6 +33,7 @@ load_dotenv()
 MODEL = PROVIDER_PRESETS["openrouter"].default_model
 VALID_BUTTONS = {"A", "B", "UP", "DOWN", "LEFT", "RIGHT", "START", "SELECT"}
 MAX_HISTORY_TURNS = 5
+SPEND_LIMIT_USD = 0.50
 
 SYSTEM_PROMPT = (
     "You are playing Pokemon Red. Your goal is to explore — leave the bedroom, walk through "
@@ -85,6 +86,7 @@ class FirstAgent(PokemonAgent):
     def run(self) -> None:
         with self._history_lock:
             self._history = [{"role": "system", "content": SYSTEM_PROMPT}]
+        self._run_cost: float = 0.0  # resets every Play
 
         while not self.should_stop():
             with self.turn(goal="explore: leave bedroom, walk Pallet Town, reach Route 1"):
@@ -111,6 +113,7 @@ class FirstAgent(PokemonAgent):
 
                 raw = response.content
                 reasoning = response.reasoning
+                self._run_cost += response.cost_usd
                 self.emit("llm_call", {
                     "provider": response.provider,
                     "model": response.model,
@@ -120,8 +123,17 @@ class FirstAgent(PokemonAgent):
                         **response.usage,
                         "latency_ms": response.latency_ms,
                         "attempts": response.attempts,
+                        "cost_usd": response.cost_usd,
+                        "run_cost_usd": self._run_cost,
                     },
                 })
+
+                if self._run_cost >= SPEND_LIMIT_USD:
+                    self.emit("budget_exceeded", {
+                        "run_cost_usd": self._run_cost,
+                        "limit_usd": SPEND_LIMIT_USD,
+                    })
+                    return
 
                 clean_response = _strip_think_tags(raw)
                 action = clean_response.upper().split()[0] if clean_response else ""

@@ -31,6 +31,25 @@ class LLMProviderConfig:
     default_model: str
 
 
+# Approximate cost per 1M tokens (input, output) for common OpenRouter models.
+# Used for spend tracking — not billing-accurate, just a safety guard.
+_COST_PER_1M: dict[str, tuple[float, float]] = {
+    "openai/gpt-4o-mini":        (0.15,  0.60),
+    "openai/gpt-4o":             (2.50, 10.00),
+    "openai/gpt-4.1-mini":       (0.40,  1.60),
+    "google/gemini-2.5-flash":   (0.15,  0.60),
+    "google/gemini-flash-1.5":   (0.075, 0.30),
+    "qwen/qwen3.6-flash":        (0.06,  0.20),
+    "anthropic/claude-haiku-4-5": (0.80, 4.00),
+}
+_COST_DEFAULT: tuple[float, float] = (1.00, 3.00)  # conservative fallback
+
+
+def estimate_cost_usd(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    input_per_1m, output_per_1m = _COST_PER_1M.get(model, _COST_DEFAULT)
+    return (prompt_tokens * input_per_1m + completion_tokens * output_per_1m) / 1_000_000
+
+
 PROVIDER_PRESETS: dict[str, LLMProviderConfig] = {
     "openrouter": LLMProviderConfig(
         name="openrouter",
@@ -74,6 +93,7 @@ class LLMResponse:
     latency_ms: int
     attempts: int
     raw_response: Any
+    cost_usd: float = 0.0
 
 
 class LLMCallError(RuntimeError):
@@ -186,15 +206,22 @@ class LLMClient:
             try:
                 raw_response = self.provider.complete(model=selected_model, messages=messages, **kwargs)
                 latency_ms = int((self._monotonic() - started_at) * 1000)
+                usage = usage_payload(raw_response)
+                cost = estimate_cost_usd(
+                    selected_model,
+                    usage.get("prompt_tokens") or 0,
+                    usage.get("completion_tokens") or 0,
+                )
                 return LLMResponse(
                     provider=self.provider.name,
                     model=selected_model,
                     content=extract_text(raw_response),
                     reasoning=extract_reasoning(raw_response),
-                    usage=usage_payload(raw_response),
+                    usage=usage,
                     latency_ms=latency_ms,
                     attempts=attempts,
                     raw_response=raw_response,
+                    cost_usd=cost,
                 )
             except Exception as exc:
                 last_exc = exc

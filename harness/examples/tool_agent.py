@@ -31,6 +31,7 @@ load_dotenv()
 MODEL = "openai/gpt-4o-mini"
 MAX_TOOL_CALLS_PER_TURN = 8
 MAX_HISTORY_TURNS = 4
+SPEND_LIMIT_USD = 0.50
 
 SYSTEM_PROMPT = (
     "You are playing Pokemon Red. You start in your bedroom on the second floor of your house.\n"
@@ -153,6 +154,7 @@ class ToolAgent(PokemonAgent):
 
     def run(self) -> None:
         self._history = [{"role": "system", "content": SYSTEM_PROMPT}]
+        self._run_cost: float = 0.0  # resets every Play
 
         while not self.should_stop():
             with self.turn(goal="leave bedroom, explore Pallet Town, reach Route 1"):
@@ -191,6 +193,7 @@ class ToolAgent(PokemonAgent):
                         raise
 
                     last_reasoning = response.reasoning
+                    self._run_cost += response.cost_usd
                     raw_msg = response.raw_response.choices[0].message
                     tool_calls = raw_msg.tool_calls or []
 
@@ -207,8 +210,17 @@ class ToolAgent(PokemonAgent):
                             **response.usage,
                             "latency_ms": response.latency_ms,
                             "attempts": response.attempts,
+                            "cost_usd": response.cost_usd,
+                            "run_cost_usd": self._run_cost,
                         },
                     })
+
+                    if self._run_cost >= SPEND_LIMIT_USD:
+                        self.emit("budget_exceeded", {
+                            "run_cost_usd": self._run_cost,
+                            "limit_usd": SPEND_LIMIT_USD,
+                        })
+                        return
 
                     if not tool_calls:
                         final_text = response.content
