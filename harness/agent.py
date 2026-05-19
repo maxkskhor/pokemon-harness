@@ -187,6 +187,8 @@ class PokemonAgent:
             }
             if error_summary is not None:
                 finish_payload["error"] = error_summary
+            if goal is not None:
+                finish_payload["goal"] = goal
             try:
                 finish_payload["frame"] = self.state().get("frame")
             except Exception:
@@ -410,7 +412,7 @@ class PokemonAgent:
         active_run_id = state.get("run_id")
         if isinstance(active_run_id, str) and active_run_id:
             self._run_id = active_run_id
-        self._turn_counter = 0
+        self._turn_counter = self._count_existing_turns(self._run_id)
         self._emit_safe(
             "lifecycle",
             {
@@ -457,6 +459,19 @@ class PokemonAgent:
             self._client._post(f"/api/harness/{self._harness_id}/error", {"message": message})
         except Exception:
             pass
+
+    def _count_existing_turns(self, run_id: str) -> int:
+        try:
+            events: Any = self._client._get(f"/api/runs/{run_id}/harness-trace")
+            if not isinstance(events, list):
+                return 0
+            return sum(
+                1
+                for event in events
+                if isinstance(event, dict) and event.get("type") == "turn_finished"
+            )
+        except Exception:
+            return 0
 
     def _new_run_id(self) -> str:
         return f"{self._run_id_prefix}-{uuid.uuid4().hex[:8]}"

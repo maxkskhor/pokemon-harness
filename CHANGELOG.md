@@ -20,6 +20,9 @@
 - `ui/src/App.tsx` — active run shows read-only pill instead of editable input; "Reset run" uses `state.run_id` so it cannot drift; passes checkpoint props to TraceList for turn-card affordances.
 - `AGENTS.md` — documented turn context API and meta.json lifecycle.
 
+### Fixed
+- `harness/agent.py` — `_count_existing_turns` now validates the harness-trace response shape before counting `turn_finished` events, keeping active-run resume typed and tolerant of unexpected API responses.
+
 ### Tests
 - `tests/test_harness_base.py` — added FakeClient `start_run` signature update; added 7 turn-context unit tests (started/finished events, ID increment, explicit ID, nested turn error, exception status, context reset, turn-ID inheritance by press).
 - `tests/test_api.py` — added tests: press/step/sequence with turn_id write to env trace; meta.json written on start, updated on stop, turns increment on turn_finished, list_runs includes meta fields; harness register stores model/metadata.

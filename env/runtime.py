@@ -460,9 +460,16 @@ class RuntimeManager:
         if request.type == "turn_finished":
             p = request.payload
             turns_patch: dict[str, Any] = {"turns": self._read_meta_turns(session.run_id) + 1}
-            summary = p.get("goal") or p.get("status")
-            if summary:
-                turns_patch["last_turn_summary"] = str(summary)
+            turn_idx = p.get("turn_index")
+            status = p.get("status", "ok")
+            goal = p.get("goal")
+            if goal:
+                summary = goal
+            elif turn_idx is not None:
+                summary = f"turn {turn_idx} ({status})"
+            else:
+                summary = str(status)
+            turns_patch["last_turn_summary"] = summary
             self._patch_meta(session.run_id, turns_patch)
         return result
 

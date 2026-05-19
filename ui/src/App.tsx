@@ -132,6 +132,10 @@ export function App() {
           }
         }
 
+        if (event.source === "harness" && event.type === "turn_finished") {
+          void refreshRunHistory();
+        }
+
         if (viewingPast) return;
 
         if (eventRunIdRef.current !== event.run_id) {
@@ -494,9 +498,9 @@ export function App() {
             filters={traceFilters}
             isRunning={selectedHarness?.status === "running" || selectedHarness?.status === "starting"}
             autoScroll={scrubPreviewFrame == null}
-            runStates={runStates}
-            onLoadCheckpoint={handleLoadCheckpoint}
-            onSaveCheckpoint={state ? handleSaveCheckpoint : undefined}
+            runStates={viewedRunId === null ? runStates : []}
+            onLoadCheckpoint={viewedRunId === null ? handleLoadCheckpoint : undefined}
+            onSaveCheckpoint={viewedRunId === null && state ? handleSaveCheckpoint : undefined}
           />
         </div>
       </aside>

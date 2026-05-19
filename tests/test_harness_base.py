@@ -217,6 +217,41 @@ def test_turn_ids_increment_correctly() -> None:
     assert turn_started_ids == ["turn-001", "turn-002"]
 
 
+def test_turn_finished_includes_goal() -> None:
+    client = FakeClient()
+    harness = PokemonAgent(client_factory=lambda _: client)
+
+    with harness.turn(goal="leave the bedroom"):
+        pass
+
+    finished = next(e for e in client.events if e["type"] == "turn_finished")
+    assert finished["payload"]["goal"] == "leave the bedroom"
+
+
+def test_resume_initialises_turn_counter_from_trace() -> None:
+    class ResumeClient(FakeClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self._harness_events: list[dict[str, Any]] = [
+                {"type": "turn_finished"},
+                {"type": "turn_finished"},
+            ]
+
+        def _get(self, path: str) -> Any:
+            if "harness-trace" in path:
+                return self._harness_events
+            return super()._get(path) if hasattr(super(), "_get") else {}
+
+    client = ResumeClient()
+    client.states = [{"run_id": "active-run", "frame": 42}]
+    harness = PokemonAgent(client_factory=lambda _: client, run_id="agent")
+
+    harness._prepare_run_for_play()
+
+    # 2 existing turns in harness trace → counter starts at 2
+    assert harness._turn_counter == 2
+
+
 def test_turn_explicit_id() -> None:
     client = FakeClient()
     harness = PokemonAgent(client_factory=lambda _: client)
