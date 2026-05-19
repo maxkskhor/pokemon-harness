@@ -1,4 +1,4 @@
-import { Activity, Pause, Play, RefreshCw, Square } from "lucide-react";
+import { Activity, Pause, Play, RefreshCw, RotateCcw, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   API_BASE,
@@ -18,6 +18,7 @@ import {
   listSharedStates,
   loadState,
   playHarness,
+  resetHarness,
   saveState,
   screenshotUrl,
   setSpeed,
@@ -315,6 +316,11 @@ export function App() {
     await runAction(() => stopHarness(selectedHarnessId), false);
   }
 
+  async function handleHarnessReset() {
+    if (!selectedHarnessId) return;
+    await runAction(() => resetHarness(selectedHarnessId), false);
+  }
+
   return (
     <main className="app-shell">
       <section className="game-pane">
@@ -438,6 +444,13 @@ export function App() {
                 disabled={busy || !selectedHarness || selectedHarness.status === "idle"}
               >
                 <Square size={14} /> Stop agent
+              </button>
+              <button
+                onClick={handleHarnessReset}
+                disabled={busy || !selectedHarness || selectedHarness.status === "disconnected"}
+                title="Stop agent and reset to bedroom save state"
+              >
+                <RotateCcw size={14} /> Reset
               </button>
             </div>
           </div>

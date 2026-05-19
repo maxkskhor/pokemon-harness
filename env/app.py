@@ -183,6 +183,14 @@ def create_app(
             raise HTTPException(status_code=404, detail="Harness not found")
         return {"ok": True}
 
+    @api.post("/api/harness/{harness_id}/reset")
+    async def harness_reset_cmd(harness_id: str) -> dict[str, Any]:
+        try:
+            harness_registry.enqueue(harness_id, "reset")
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Harness not found")
+        return {"ok": True}
+
     @api.get("/api/harness/{harness_id}/poll")
     async def harness_poll(harness_id: str) -> dict[str, Any]:
         try:

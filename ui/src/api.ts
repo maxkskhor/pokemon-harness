@@ -128,6 +128,10 @@ export function stopHarness(id: string): Promise<{ ok: boolean }> {
   return request<{ ok: boolean }>(`/api/harness/${id}/stop`, { method: "POST" });
 }
 
+export function resetHarness(id: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/api/harness/${id}/reset`, { method: "POST" });
+}
+
 export interface SavedState {
   name: string;
   size: number;

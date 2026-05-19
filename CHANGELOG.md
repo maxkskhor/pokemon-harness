@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-05-19 (Reset button)
+
+### Added
+- `env/app.py` — `POST /api/harness/{id}/reset` endpoint; enqueues a "reset" command to the harness.
+- `harness/agent.py` — handles "reset" command in `_control_loop`: stops agent loop, calls `stop_run()` to close the env session, resets turn counter and run ID so the next Play starts fresh from the bedroom save state.
+- `ui/src/api.ts` — `resetHarness()` API function.
+- `ui/src/App.tsx` — "Reset" button (with RotateCcw icon) in the agent controls; enabled whenever a harness is connected and not disconnected.
+
 ## 2026-05-19 (README screenshot)
 
 ### Added
