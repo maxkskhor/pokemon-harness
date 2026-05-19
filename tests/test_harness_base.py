@@ -78,9 +78,9 @@ def test_harness_press_delegates_to_client_without_duplicate_event() -> None:
     client = FakeClient()
     harness = PokemonAgent(client_factory=lambda _: client)
 
-    harness.press("RIGHT", frames=8)
+    harness.press("RIGHT")
 
-    assert client.pressed == [("RIGHT", 8)]
+    assert client.pressed == [("RIGHT", 16)]
     assert client.events == []
 
 
@@ -88,14 +88,12 @@ def test_harness_public_helpers_delegate_to_client() -> None:
     client = FakeClient()
     harness = PokemonAgent(client_factory=lambda _: client)
 
-    assert harness.wait(12) == {"frames": 12}
     assert harness.sequence([{"type": "wait", "frames": 3}]) == {"steps": [{"type": "wait", "frames": 3}]}
     # Default PokemonAgent.serialize_history returns {}; save_state passes None.
     save_result = harness.save_state("checkpoint")
     assert save_result == {"name": "checkpoint", "has_agent_state": False}
     assert harness.load_state("checkpoint") == {"name": "checkpoint"}
 
-    assert client.waited == [12]
     assert client.sequences == [[{"type": "wait", "frames": 3}]]
     assert client.saved == [("checkpoint", None)]
     assert client.loaded == ["checkpoint"]
@@ -310,7 +308,7 @@ def test_press_inherits_turn_id_from_context() -> None:
 
     # press calls client.press_button which uses _current_turn_id
     # Verify the turn_id was set during the call by checking the pressed list
-    assert ("RIGHT", 8) in client.pressed
+    assert ("RIGHT", 16) in client.pressed
     _ = turn_id  # used, not leaked
 
 

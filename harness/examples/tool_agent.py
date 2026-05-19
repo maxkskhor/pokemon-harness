@@ -137,7 +137,7 @@ class ToolAgent(PokemonAgent):
             direction = args["direction"]
             steps = max(1, min(10, int(args.get("steps", 1))))
             for _ in range(steps):
-                self.press(direction, frames=16)
+                self.press(direction)
             state = self.state()
             pos = _pos_from_state(state)
             return {"moved": direction, "steps": steps, "position": pos}

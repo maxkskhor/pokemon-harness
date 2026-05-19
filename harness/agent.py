@@ -12,7 +12,7 @@ from pathlib import Path
 from queue import Empty, Queue
 from typing import Any, Callable, Generator
 
-from harness.client import PokemonEnvClient, _current_turn_id
+from harness.client import PokemonEnvClient, _DPAD, _current_turn_id
 
 logger = logging.getLogger("pokemon_harness.agent")
 
@@ -67,22 +67,18 @@ class PokemonAgent:
         """Return the current game state (frame, position, party, etc.)."""
         return self._client.get_state()
 
-    def wait(self, frames: int) -> dict[str, Any]:
-        """Advance the emulator by game frames without pressing a button."""
-        return self._client.wait(frames)
-
     def sequence(self, steps: list[dict[str, Any]]) -> dict[str, Any]:
         """Run a press/wait action sequence."""
         return self._client.press_sequence(steps)
 
-    def press(self, button: str, frames: int = 8) -> None:
+    def press(self, button: str) -> None:
         """Press a GameBoy button.
 
-        The env publishes the canonical `button_press` trace event (with frame deltas,
-        screen hash, and before/after position) — the agent does not need to emit a
-        duplicate event of its own.
+        Direction buttons (UP/DOWN/LEFT/RIGHT) hold for 16 frames so the full tile
+        animation completes before returning. Action buttons (A/B/START/SELECT) hold
+        for 8 frames. The env publishes the canonical `button_press` trace event.
         """
-        self._client.press_button(button, frames)
+        self._client.press_button(button, 16 if button in _DPAD else 8)
 
     def save_state(self, name: str) -> dict[str, Any]:
         """Save the current emulator state under a run-local name.

@@ -85,6 +85,8 @@ After completing any meaningful work, append an entry to `CHANGELOG.md`. Group b
 
 `wait(N)` in `harness/client.py` generates `{"type": "wait", "frames": N}`. The backend calls `emulator.tick(N)` — each tick is one frame at 60 fps. `wait(1700)` ≈ 28 real seconds at 1x speed, but executes instantly at max speed.
 
+`wait` is a low-level primitive used by `scripts/setup.py` and sequence builders. It is **not** exposed on `PokemonAgent` — agent code uses `press()` and `sequence()` instead.
+
 ## Bedroom save state facts
 
 - Verified position: `map_id=38`, `x=3`, `y=6`.
@@ -109,7 +111,11 @@ raw = (response.choices[0].message.content or "").strip()
 
 ## PyBoy button press duration
 
-`press(button, frames=8)` holds the button for 8 frames. A full tile step in Pokemon Red takes ~16 frames. Eight frames is enough to register movement but the coordinate in memory may not update until the tile transition completes; the next `state()` call sees the new position.
+`PokemonAgent.press(button)` automatically selects hold duration based on button type:
+- **Direction buttons** (UP/DOWN/LEFT/RIGHT): 16 frames — enough for the full tile animation to complete. A screenshot or `state()` call immediately after will show the character settled on the new tile.
+- **Action buttons** (A/B/START/SELECT): 8 frames — enough to register menu/dialogue input.
+
+The underlying `PokemonEnvClient.press_button(button, frames)` and the module-level `press(button, frames=None)` helper still accept an explicit `frames` argument for low-level scripting (e.g. `scripts/setup.py`).
 
 ## Turn context API
 
@@ -124,7 +130,7 @@ with self.turn(goal="leave the bedroom"):
     self.press("RIGHT")
 ```
 
-**Do not pass `turn_id` manually** in the happy path. `emit`, `press`, `wait`, and `sequence` inherit the current turn ID via `contextvars.ContextVar` — no threading required.
+**Do not pass `turn_id` manually** in the happy path. `emit`, `press`, and `sequence` inherit the current turn ID via `contextvars.ContextVar` — no threading required.
 
 `turn_id` is only useful for advanced/debug cases (e.g. manually correlating events from a helper outside the with-block).
 

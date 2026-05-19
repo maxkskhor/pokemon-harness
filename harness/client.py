@@ -136,7 +136,12 @@ class PokemonEnvClient:
         return response.json()
 
 
-def press(button: str, frames: int = 8) -> dict[str, Any]:
+_DPAD: frozenset[str] = frozenset({"UP", "DOWN", "LEFT", "RIGHT"})
+
+
+def press(button: str, frames: int | None = None) -> dict[str, Any]:
+    if frames is None:
+        frames = 16 if button in _DPAD else 8
     return {"type": "press", "button": button, "frames": frames}
 
 
