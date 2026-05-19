@@ -47,12 +47,12 @@ class HarnessRegistry:
         model: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> str:
-        reusable = next(
-            (r for r in self._records.values() if r["name"] == name and r["status"] in ("idle", "disconnected")),
-            None,
-        )
-        if reusable:
-            hid = reusable["id"]
+        reusable_ids = [r["id"] for r in self._records.values() if r["name"] == name and r["status"] in ("idle", "disconnected")]
+        if reusable_ids:
+            hid = reusable_ids[0]
+            for stale_id in reusable_ids[1:]:
+                self._records.pop(stale_id, None)
+                self._commands.pop(stale_id, None)
             now = _now()
             self._records[hid].update({"model": model, "metadata": metadata or {}, "status": "idle", "error": None, "updated_at": now, "last_seen_at": now})
             self._commands[hid] = deque(maxlen=self._max_commands)
@@ -174,7 +174,27 @@ class HarnessRegistry:
                 [cmd for cmd in queued if isinstance(cmd, str)],
                 maxlen=self._max_commands,
             )
+        self._dedup_idle()
         self._persist()
+
+    def _dedup_idle(self) -> None:
+        seen: dict[str, str] = {}
+        for hid, record in list(self._records.items()):
+            if record.get("status") not in ("idle", "disconnected"):
+                continue
+            name = record.get("name", "")
+            if name not in seen:
+                seen[name] = hid
+            else:
+                keep = seen[name]
+                challenger = hid
+                if self._records[challenger]["created_at"] > self._records[keep]["created_at"]:
+                    self._records.pop(keep, None)
+                    self._commands.pop(keep, None)
+                    seen[name] = challenger
+                else:
+                    self._records.pop(challenger, None)
+                    self._commands.pop(challenger, None)
 
     def _persist(self) -> None:
         if self._storage_path is None:
