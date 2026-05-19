@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-05-19 (fix stale Running status)
+
+### Fixed
+- `env/runtime.py` — `RuntimeManager.__init__` now calls `_heal_stale_runs()` on startup, marking any runs left as `"running"` from a previous server process as `"stopped"`. Prevents ghost "Running" entries after a crash or kill.
+- `harness/agent.py` — `_control_loop` "stop" command now calls `self._client.stop_run()` after the run thread finishes, so `meta.json` is written with `status: "stopped"` and `ended_at`. Previously only "reset" did this.
+- `env/harness_registry.py` — `register()` now reuses an existing `idle` or `disconnected` entry with the same name instead of always creating a new one. Prevents duplicate agent entries accumulating in the UI dropdown when the harness restarts.
+
 ## 2026-05-19 (docs gardening)
 
 ### Changed

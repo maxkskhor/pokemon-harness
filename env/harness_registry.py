@@ -47,6 +47,17 @@ class HarnessRegistry:
         model: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> str:
+        reusable = next(
+            (r for r in self._records.values() if r["name"] == name and r["status"] in ("idle", "disconnected")),
+            None,
+        )
+        if reusable:
+            hid = reusable["id"]
+            now = _now()
+            self._records[hid].update({"model": model, "metadata": metadata or {}, "status": "idle", "error": None, "updated_at": now, "last_seen_at": now})
+            self._commands[hid] = deque(maxlen=self._max_commands)
+            self._persist()
+            return hid
         hid = uuid.uuid4().hex[:8]
         now = _now()
         self._records[hid] = {

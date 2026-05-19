@@ -255,6 +255,7 @@ class RuntimeManager:
         self.emulator_factory = emulator_factory
         self.broker = EventBroker()
         self.session: Session | None = None
+        self._heal_stale_runs()
 
     async def start_run(
         self,
@@ -668,6 +669,18 @@ class RuntimeManager:
         self._meta_path(session.run_id).write_text(
             json.dumps(meta, sort_keys=True, indent=2), encoding="utf-8"
         )
+
+    def _heal_stale_runs(self) -> None:
+        """Mark any runs left as 'running' from a previous server process as 'stopped'."""
+        runs_dir = self.trace_store.runs_dir
+        if not runs_dir.exists():
+            return
+        for run_dir in runs_dir.iterdir():
+            if not run_dir.is_dir():
+                continue
+            meta = self._load_meta(run_dir.name)
+            if meta and meta.get("status") == "running":
+                self._patch_meta(run_dir.name, {"status": "stopped", "ended_at": now_iso()})
 
     def _patch_meta(self, run_id: str, updates: dict[str, Any]) -> None:
         path = self._meta_path(run_id)

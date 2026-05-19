@@ -339,6 +339,10 @@ class PokemonAgent:
                 if run_thread and run_thread.is_alive():
                     run_thread.join(timeout=10)
                 run_thread = None
+                try:
+                    self._client.stop_run()
+                except Exception:
+                    pass
                 self._set_status("idle")
                 self._emit_safe("lifecycle", {"status": "idle"})
 
