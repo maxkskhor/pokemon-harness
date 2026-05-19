@@ -22,6 +22,7 @@ runs/*
 
 # Debug screenshots captured during development.
 *.png
+!docs/assets/*.png
 
 # Frontend artifacts.
 ui/node_modules/

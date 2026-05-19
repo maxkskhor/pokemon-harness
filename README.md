@@ -4,6 +4,8 @@ A local harness for running LLM agents against Pokemon Red/Blue, with live gamep
 
 Use it to watch what an agent saw, what it decided, which button it pressed, and how a run can be inspected or replayed afterwards.
 
+![Pokemon LLM Harness UI showing live gameplay beside turn-by-turn trace cards](docs/assets/demo-page.png)
+
 ## Features
 
 - Live browser UI with gameplay on the left and agent/environment traces on the right.

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-05-19 (README screenshot)
+
+### Added
+- `.gitignore` — allowed committed PNG assets under `docs/assets/` while keeping ad hoc development screenshots ignored.
+- `docs/assets/demo-page.png` — added the current UI screenshot for README display; replace this file when the UI demo image needs refreshing.
+- `README.md` — embedded the demo screenshot near the top of the page so visitors can see the gameplay and trace UI before setup.
+
 ## 2026-05-19 (rename my_agent → first_agent)
 
 ### Changed
