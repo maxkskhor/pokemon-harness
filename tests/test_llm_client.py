@@ -51,7 +51,12 @@ def test_llm_client_retries_rate_limit_then_returns_response() -> None:
     assert response.model == "fake-model"
     assert response.content == "DOWN"
     assert response.attempts == 2
-    assert response.usage == {"prompt_tokens": 10, "completion_tokens": 1, "total_tokens": 11}
+    assert response.usage == {
+        "prompt_tokens": 10,
+        "completion_tokens": 1,
+        "total_tokens": 11,
+        "cached_tokens": None,
+    }
     assert sleeps == [1]
     assert len(provider.calls) == 2
 

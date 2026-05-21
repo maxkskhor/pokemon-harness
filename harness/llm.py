@@ -17,8 +17,8 @@ import openai
 @dataclass(frozen=True)
 class RetryPolicy:
     max_retries: int = 4
-    initial_delay_s: float = 2.0
-    max_delay_s: float = 30.0
+    initial_delay_s: float = 5.0
+    max_delay_s: float = 60.0
     backoff_factor: float = 2.0
     jitter_s: float = 0.25
 
@@ -284,10 +284,12 @@ def strip_think_tags(text: str) -> str:
 
 def usage_payload(response: Any) -> dict[str, int | None]:
     usage = getattr(response, "usage", None)
+    details = getattr(usage, "prompt_tokens_details", None)
     return {
         "prompt_tokens": getattr(usage, "prompt_tokens", None),
         "completion_tokens": getattr(usage, "completion_tokens", None),
         "total_tokens": getattr(usage, "total_tokens", None),
+        "cached_tokens": getattr(details, "cached_tokens", None),
     }
 
 

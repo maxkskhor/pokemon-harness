@@ -5,14 +5,13 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AGENTS_YAML="$ROOT_DIR/agents.yaml"
 LOG_DIR="$ROOT_DIR/logs"
 
-PIDS=()
-
+# Kill the entire process group on exit so uv/npm child processes (python, vite, etc.)
+# don't survive as orphans after Ctrl+C. kill 0 = send to every process in this
+# process group, which includes all background jobs and their children.
 cleanup() {
-  for pid in "${PIDS[@]:-}"; do
-    kill "$pid" >/dev/null 2>&1 || true
-  done
+  kill 0 2>/dev/null || true
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 mkdir -p "$LOG_DIR"
 
@@ -23,11 +22,9 @@ done
 
 cd "$ROOT_DIR"
 uv run uvicorn env.app:app --host 127.0.0.1 --port 8000 >"$LOG_DIR/backend.log" 2>&1 &
-PIDS+=($!)
 
 cd "$ROOT_DIR/ui"
 npm run dev -- --host 127.0.0.1 --port 5173 >"$LOG_DIR/frontend.log" 2>&1 &
-PIDS+=($!)
 
 echo "Backend:  http://127.0.0.1:8000  →  $LOG_DIR/backend.log"
 echo "Frontend: http://127.0.0.1:5173  →  $LOG_DIR/frontend.log"
@@ -47,7 +44,6 @@ if [ -f "$AGENTS_YAML" ]; then
     echo "Starting agent: $module  →  $log_file"
     cd "$ROOT_DIR"
     PYTHONUNBUFFERED=1 uv run python -m "$module" >"$log_file" 2>&1 &
-    PIDS+=($!)
   done < <(cd "$ROOT_DIR" && uv run python -c "
 import yaml
 with open('$AGENTS_YAML') as f:

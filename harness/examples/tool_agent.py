@@ -27,9 +27,9 @@ from harness.llm import LLMCallError, LLMClient, provider_from_env
 
 load_dotenv()
 
-MODEL = "openai/gpt-4o-mini"
+MODEL = "qwen/qwen3.6-flash"
 MAX_TOOL_CALLS_PER_TURN = 8
-MAX_HISTORY_TURNS = 4
+MAX_HISTORY_TURNS = 12
 SPEND_LIMIT_USD = 0.50
 
 SYSTEM_PROMPT = (
@@ -106,6 +106,26 @@ def _pos_from_state(state: dict[str, Any]) -> dict[str, Any]:
     return {"map_id": p.get("map_id"), "x": p.get("x"), "y": p.get("y")}
 
 
+def _action_summary(actions: list[dict[str, Any]]) -> str:
+    parts = []
+    for a in actions:
+        tool, result = a["tool"], a["result"]
+        if tool == "move":
+            pos = result.get("position", {})
+            parts.append(f"move {result['moved']}×{result['steps']}→(x={pos.get('x')},y={pos.get('y')},map={pos.get('map_id')})")
+        elif tool == "press_button":
+            parts.append(f"press {result['pressed']}")
+        elif tool == "get_state":
+            parts.append(f"get_state→(x={result.get('x')},y={result.get('y')},map={result.get('map_id')})")
+        else:
+            parts.append(tool)
+    return ", ".join(parts) if parts else "(no actions)"
+
+
+def _cached_system(text: str) -> dict[str, Any]:
+    return {"role": "system", "content": [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]}
+
+
 def _strip_image_urls(value: Any) -> Any:
     if isinstance(value, list):
         return [_strip_image_urls(item) for item in value]
@@ -119,13 +139,13 @@ def _strip_image_urls(value: Any) -> Any:
 
 class ToolAgent(PokemonAgent):
     name = "Tool Agent"
-    model = "openai/gpt-4o-mini"
+    model = MODEL
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._llm = LLMClient(provider_from_env("openrouter"))
         # Cross-turn history: [system] + alternating [user, assistant] pairs (no tool call details)
-        self._history: list[dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        self._history: list[dict[str, Any]] = [_cached_system(SYSTEM_PROMPT)]
 
     def _execute_tool(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
         if name == "get_state":
@@ -150,7 +170,7 @@ class ToolAgent(PokemonAgent):
         return {"error": f"unknown tool: {name}"}
 
     def run(self) -> None:
-        self._history = [{"role": "system", "content": SYSTEM_PROMPT}]
+        self._history = [_cached_system(SYSTEM_PROMPT)]
         self._run_cost: float = 0.0  # resets every Play
 
         while not self.should_stop():
@@ -180,7 +200,6 @@ class ToolAgent(PokemonAgent):
 
                 actions_taken: list[dict[str, Any]] = []
                 final_text = ""
-                last_reasoning: str | None = None
 
                 for _ in range(MAX_TOOL_CALLS_PER_TURN):
                     try:
@@ -189,7 +208,6 @@ class ToolAgent(PokemonAgent):
                         self.emit("llm_error", exc.to_payload())
                         raise
 
-                    last_reasoning = response.reasoning
                     self._run_cost += response.cost_usd
                     raw_msg = response.raw_response.choices[0].message
                     tool_calls = raw_msg.tool_calls or []
@@ -198,11 +216,14 @@ class ToolAgent(PokemonAgent):
                         "provider": response.provider,
                         "model": response.model,
                         "messages": _strip_image_urls(messages),
-                        "tool_calls": [
-                            {"id": tc.id, "name": tc.function.name, "arguments": tc.function.arguments}
-                            for tc in tool_calls
-                        ],
-                        "response": response.content,
+                        "response": {
+                            "content": response.content,
+                            "tool_calls": [
+                                {"name": tc.function.name, "arguments": tc.function.arguments}
+                                for tc in tool_calls
+                            ],
+                            "reasoning": response.reasoning,
+                        },
                         "usage": {
                             **response.usage,
                             "latency_ms": response.latency_ms,
@@ -249,15 +270,27 @@ class ToolAgent(PokemonAgent):
                             "content": json.dumps(result),
                         })
 
-                self.emit("decision", {
-                    "actions": actions_taken,
-                    "reasoning": last_reasoning,
-                    "final_response": final_text,
+                summary = _action_summary(actions_taken)
+                self.emit("actions", {
+                    "tool_calls": actions_taken,
+                    "summary": summary,
                 })
 
-                # Store only user + final assistant text in cross-turn history (keeps it compact)
-                self._history.append(user_msg)
-                self._history.append({"role": "assistant", "content": final_text or json.dumps(actions_taken)})
+                # Store text-only user message + action summary in cross-turn history.
+                # cache_control on the last assistant message marks the full history prefix
+                # as the cache boundary — grows each turn, hits threshold after a few turns.
+                text_only = next(c["text"] for c in user_msg["content"] if c["type"] == "text")
+                # Remove cache_control from previous tail (only the latest entry should carry it)
+                if len(self._history) >= 2 and isinstance(self._history[-1].get("content"), list):
+                    self._history[-1]["content"] = [
+                        {k: v for k, v in b.items() if k != "cache_control"}
+                        for b in self._history[-1]["content"]
+                    ]
+                self._history.append({"role": "user", "content": text_only})
+                self._history.append({
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": final_text or summary, "cache_control": {"type": "ephemeral"}}],
+                })
                 # Trim: system + last N turn pairs
                 max_msgs = 1 + MAX_HISTORY_TURNS * 2
                 if len(self._history) > max_msgs:

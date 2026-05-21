@@ -9,6 +9,19 @@ The ultimate goal is an **optimal UI for observing gameplay and how the Pokemon 
 
 When proposing or making changes, weigh them against these two goals. A change that adds a feature but reduces inspectability or makes debugging harder is a regression. A change that makes a run easier to understand or replay is a win.
 
+## Testing and teardown
+
+When running the stack (backend, frontend, agents) during testing or verification, **always tear everything down fully before finishing**. Leaving processes running creates stale harness registrations, ghost agents, and confusing UI state for the user.
+
+Proper teardown:
+```bash
+pkill -f "uvicorn|vite|tool_agent|first_agent|dev.sh" 2>/dev/null || true
+sleep 2
+lsof -ti :8000 -ti :5173 | xargs kill -9 2>/dev/null || true
+```
+
+Also: **never trigger play on an agent via the API while a different agent is showing in the UI dropdown**. This creates a situation where the running agent can't be stopped from the UI (Stop button only applies to the dropdown-selected agent). Always use the UI to start agents, or if using the API, confirm the harness ID matches what the UI shows.
+
 ## Coding principles for non-trivial tasks
 
 Apply these when tackling TODO items, new features, or refactors. They address the most common failure modes: wrong assumptions, overengineering, sprawling edits, and vague goals.
