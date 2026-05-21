@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-05-22 (Tool Agent bedroom loop fixes)
+
+### Fixed
+- `harness/examples/tool_agent.py` — plain-text LLM responses such as `move LEFT` no longer silently become successful no-op turns. The agent now injects a current-turn user reminder that plain text is ignored and retries for an actual tool call without writing that reminder or failed text into the cached cross-turn history.
+- `harness/examples/tool_agent.py` — `move()` tool results now include `before`, `after`, and boolean `moved` fields after a short settle wait, reducing false "blocked" feedback from reading state too soon after a direction press.
+- `harness/examples/tool_agent.py` — agent turns temporarily pause emulator playback and restore the previous speed afterward, so LLM thinking and tool execution do not race the background playback loop.
+
+### Added
+- `harness/examples/tool_agent.py` — lightweight stuck-loop detection for repeated no-action turns, unchanged positions, and repeated failed directions; reminders are added only to the fresh user message for that turn.
+- `tests/test_tool_agent.py` — regression tests for settled move results, current-turn-only tool-call reminders, speed pause/restore, and repeated failed-direction reminders.
+
 ## 2026-05-21 (run_stopped UI race)
 
 ### Fixed
