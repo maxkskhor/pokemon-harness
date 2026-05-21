@@ -1,4 +1,4 @@
-import { Activity, Pause, Play, RefreshCw, RotateCcw, Square } from "lucide-react";
+import { Activity, History, Pause, Play, RefreshCw, RotateCcw, Square } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   API_BASE,
@@ -19,6 +19,7 @@ import {
   loadState,
   playHarness,
   resetHarness,
+  resumeHarness,
   saveState,
   screenshotUrl,
   setSpeed,
@@ -65,8 +66,55 @@ export function App() {
     error: true,
   });
   const eventRunIdRef = useRef<string | null>(null);
+  // Tracks whether we've already auto-selected the harness for the active run
+  // discovered on initial mount. AGENTS.md is explicit that Stop only targets
+  // the dropdown selection — so on reload, the dropdown must match the agent
+  // that owns active_run. After this fires once, the user is in control.
+  const autoSelectAttemptedRef = useRef(false);
 
   const selectedHarness = harnessAgents.find((h) => h.id === selectedHarnessId) ?? null;
+  const viewedRunSummary = viewedRunId
+    ? runHistory.find((r) => r.run_id === viewedRunId) ?? null
+    : null;
+  const isViewingPastRun = viewedRunId !== null;
+
+  // When viewing the live area (not a past run), surface the *latest* stopped run
+  // for the selected agent that has an auto-resume snapshot. That snapshot is
+  // written by Stop and cleared by Reset, so it's the right signal for the
+  // primary action's Start↔Resume label.
+  const resumableRun = !isViewingPastRun && selectedHarness
+    ? runHistory.find(
+        (r) =>
+          !r.active &&
+          r.has_auto_resume === true &&
+          (r.agent?.name ?? null) === selectedHarness.name,
+      ) ?? null
+    : null;
+
+  // Final intent for the primary action button. Three states:
+  //   "start"  – no resumable state, click starts fresh from `bedroom`.
+  //   "resume" – there is a resumable past run; click branches from `_auto_resume`.
+  //   (when viewing a past run, isViewingPastRun forces "resume" on the viewed run.)
+  const primaryIntent: "start" | "resume" = isViewingPastRun || resumableRun ? "resume" : "start";
+
+  const viewedRunHasCheckpoint = runStates.length > 0;
+  const viewedRunAgentName = viewedRunSummary?.agent?.name ?? null;
+  let resumeBlocker: string | null = null;
+  if (isViewingPastRun) {
+    if (!viewedRunHasCheckpoint) {
+      resumeBlocker = "This run has no saved checkpoints to resume from.";
+    } else if (!selectedHarness) {
+      resumeBlocker = viewedRunAgentName
+        ? `Connect the '${viewedRunAgentName}' agent to resume this run.`
+        : "Select a connected agent to resume.";
+    } else if (viewedRunAgentName && selectedHarness.name !== viewedRunAgentName) {
+      resumeBlocker = `Selected agent '${selectedHarness.name}' does not match this run's agent '${viewedRunAgentName}'.`;
+    } else if (selectedHarness.status === "running") {
+      resumeBlocker = "Stop the running agent before resuming a past run.";
+    } else if (selectedHarness.status === "disconnected") {
+      resumeBlocker = "Selected agent is disconnected.";
+    }
+  }
 
   // Restore active run on page load
   useEffect(() => {
@@ -111,23 +159,33 @@ export function App() {
         const viewingPast = viewedRunIdRef.current !== null && viewedRunIdRef.current !== event.run_id;
 
         if (event.source === "env") {
-          setImageVersion((version) => version + 1);
-          // playback_frame fires every 0.1s — skip full state refresh, image bump is enough
-          if (event.type !== "playback_frame") {
-            void refreshState(false);
-          }
-          if (event.type === "state_saved" || event.type === "state_loaded") {
-            void refreshCheckpoints(event.run_id);
-          }
-          if (event.type === "run_started" || event.type === "run_stopped") {
+          if (event.type === "run_stopped") {
+            // The env session is gone. Clear local state directly instead of
+            // re-fetching — /api/state and /api/screenshot.png will 404 once the
+            // session is None, and browsers log those even when we catch them.
+            setState(null);
+            setImageVersion(0);
+            eventRunIdRef.current = null;
             void refreshRunHistory();
-          }
-          if (event.frame != null) {
-            setFrameNumbers((current) => {
-              const frame = event.frame as number;
-              if (current.includes(frame)) return current;
-              return [...current, frame].sort((a, b) => a - b);
-            });
+          } else {
+            setImageVersion((version) => version + 1);
+            // playback_frame fires every 0.1s — skip full state refresh, image bump is enough
+            if (event.type !== "playback_frame") {
+              void refreshState(false);
+            }
+            if (event.type === "state_saved" || event.type === "state_loaded") {
+              void refreshCheckpoints(event.run_id);
+            }
+            if (event.type === "run_started") {
+              void refreshRunHistory();
+            }
+            if (event.frame != null) {
+              setFrameNumbers((current) => {
+                const frame = event.frame as number;
+                if (current.includes(frame)) return current;
+                return [...current, frame].sort((a, b) => a - b);
+              });
+            }
           }
         }
 
@@ -155,6 +213,23 @@ export function App() {
       ws?.close();
     };
   }, []);
+
+  // On the first time we discover an active run (e.g. on page reload), align the
+  // dropdown with the harness that started that run. Subsequent runs are
+  // user-initiated, so we leave the selection alone after this fires once.
+  useEffect(() => {
+    if (autoSelectAttemptedRef.current) return;
+    if (!state) return;
+    if (harnessAgents.length === 0) return;
+    autoSelectAttemptedRef.current = true;
+    const activeRunSummary = runHistory.find((r) => r.run_id === state.run_id);
+    const activeAgentName = activeRunSummary?.agent?.name;
+    if (!activeAgentName) return;
+    const matching = harnessAgents.find((h) => h.name === activeAgentName);
+    if (matching && matching.id !== selectedHarnessId) {
+      setSelectedHarnessId(matching.id);
+    }
+  }, [state, harnessAgents, runHistory, selectedHarnessId]);
 
   // Poll harness registry
   useEffect(() => {
@@ -281,10 +356,13 @@ export function App() {
       if (activeRunId) {
         await refreshTraces(activeRunId);
         await refreshFrames(activeRunId);
+        await refreshCheckpoints(activeRunId);
       }
       return;
     }
     await refreshTraces(runId);
+    await refreshFrames(runId);
+    await refreshCheckpoints(runId);
   }
 
   async function handleSaveCheckpoint() {
@@ -320,12 +398,59 @@ export function App() {
 
   async function handleHarnessStop() {
     if (!selectedHarnessId) return;
-    await runAction(() => stopHarness(selectedHarnessId), false);
+    await runAction(async () => {
+      const result = await stopHarness(selectedHarnessId);
+      // The agent writes `_auto_resume` on stop. Refresh runHistory so the
+      // primary action below flips to "Resume agent".
+      // Give the agent's control loop a beat to finish save_state before we
+      // re-read state (it runs after run_thread.join).
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await refreshRunHistory();
+      return result;
+    }, false);
   }
 
   async function handleHarnessReset() {
     if (!selectedHarnessId) return;
-    await runAction(() => resetHarness(selectedHarnessId), false);
+    await runAction(async () => {
+      const result = await resetHarness(selectedHarnessId);
+      // Reset wipes auto_resume snapshots for this agent. Re-read runHistory
+      // so the primary action below flips back to "Start agent".
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await refreshRunHistory();
+      return result;
+    }, false);
+  }
+
+  async function handleHarnessResume() {
+    if (!selectedHarnessId) return;
+    // Source run = the one being viewed (if user picked a past run) or the most
+    // recent resumable run for the selected agent (resume-after-stop flow).
+    const sourceRunId = viewedRunId ?? resumableRun?.run_id ?? null;
+    if (!sourceRunId) return;
+    // Default to the auto-snapshot. For live-resume we just pass "_auto_resume"
+    // by name; the server validates it exists. For past-run-resume we additionally
+    // honor whatever the user has in the Checkpoints panel as a fallback.
+    let checkpoint = "_auto_resume";
+    if (viewedRunId) {
+      const auto = runStates.find((s) => s.name === "_auto_resume");
+      const fallback = runStates[0];
+      checkpoint = (auto ?? fallback)?.name ?? checkpoint;
+    }
+    await runAction(async () => {
+      const result = await resumeHarness(selectedHarnessId, {
+        source_run_id: sourceRunId,
+        checkpoint_name: checkpoint,
+      });
+      // Flip the UI to live view so it follows the new branched run.
+      setViewedRunId(null);
+      eventRunIdRef.current = result.run_id;
+      await refreshTraces(result.run_id);
+      await refreshFrames(result.run_id);
+      await refreshCheckpoints(result.run_id);
+      await refreshRunHistory();
+      return result;
+    }, true);
   }
 
   return (
@@ -441,12 +566,34 @@ export function App() {
                       <option key={h.id} value={h.id}>{h.name} · {h.status}</option>
                     ))}
               </select>
-              <button
-                onClick={handleHarnessPlay}
-                disabled={busy || !selectedHarness || selectedHarness.status === "running" || selectedHarness.status === "disconnected"}
-              >
-                <Play size={14} /> Play agent
-              </button>
+              {primaryIntent === "resume" ? (
+                <button
+                  onClick={handleHarnessResume}
+                  disabled={
+                    busy
+                    || resumeBlocker !== null
+                    || !selectedHarness
+                    || selectedHarness.status === "running"
+                    || selectedHarness.status === "disconnected"
+                  }
+                  title={
+                    resumeBlocker
+                    ?? (isViewingPastRun
+                      ? "Resume this run from its latest checkpoint"
+                      : `Resume ${resumableRun?.run_id ?? "this agent"} from its auto-snapshot`)
+                  }
+                >
+                  <History size={14} /> Resume agent
+                </button>
+              ) : (
+                <button
+                  onClick={handleHarnessPlay}
+                  disabled={busy || !selectedHarness || selectedHarness.status === "running" || selectedHarness.status === "disconnected"}
+                  title="Start a fresh run from the bedroom save state"
+                >
+                  <Play size={14} /> Start agent
+                </button>
+              )}
               <button
                 onClick={handleHarnessStop}
                 disabled={busy || !selectedHarness || selectedHarness.status === "idle"}

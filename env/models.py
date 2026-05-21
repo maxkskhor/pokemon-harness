@@ -91,3 +91,18 @@ class HarnessStatusRequest(BaseModel):
 
 class HarnessErrorRequest(BaseModel):
     message: str = Field(min_length=1, max_length=500)
+
+
+class HarnessResumeRequest(BaseModel):
+    source_run_id: str = Field(min_length=1, max_length=80)
+    checkpoint_name: str = Field(default="_auto_resume", min_length=1, max_length=80)
+
+    @field_validator("source_run_id")
+    @classmethod
+    def validate_source_run_id(cls, value: str) -> str:
+        return ensure_safe_name(value, "source_run_id")
+
+    @field_validator("checkpoint_name")
+    @classmethod
+    def validate_checkpoint_name(cls, value: str) -> str:
+        return ensure_safe_name(value, "checkpoint_name")

@@ -132,6 +132,19 @@ export function resetHarness(id: string): Promise<{ ok: boolean }> {
   return request<{ ok: boolean }>(`/api/harness/${id}/reset`, { method: "POST" });
 }
 
+export function resumeHarness(
+  id: string,
+  body: { source_run_id: string; checkpoint_name?: string },
+): Promise<{ ok: boolean; run_id: string; parent_run_id: string; parent_checkpoint: string; frame: number }> {
+  return request(`/api/harness/${id}/resume_run`, {
+    method: "POST",
+    body: JSON.stringify({
+      source_run_id: body.source_run_id,
+      checkpoint_name: body.checkpoint_name ?? "_auto_resume",
+    }),
+  });
+}
+
 export interface SavedState {
   name: string;
   size: number;
@@ -144,6 +157,8 @@ export interface RunSummary {
   modified_at: string;
   has_env: boolean;
   has_harness: boolean;
+  has_checkpoints?: boolean;
+  has_auto_resume?: boolean;
   active: boolean;
   bytes: number;
   // meta.json fields (present when available)
@@ -164,6 +179,8 @@ export interface RunSummary {
     title?: string | null;
   } | null;
   start_state?: string | null;
+  parent_run_id?: string | null;
+  parent_checkpoint?: string | null;
 }
 
 export function listRuns(): Promise<RunSummary[]> {

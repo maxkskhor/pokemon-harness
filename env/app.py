@@ -17,6 +17,7 @@ from env.models import (
     HarnessErrorRequest,
     HarnessEventRequest,
     HarnessRegisterRequest,
+    HarnessResumeRequest,
     HarnessStatusRequest,
     PressAction,
     SaveStateRequest,
@@ -198,6 +199,61 @@ def create_app(
         except KeyError:
             raise HTTPException(status_code=404, detail="Harness not found")
         return {"ok": True}
+
+    @api.post("/api/harness/{harness_id}/resume_run")
+    async def harness_resume_run(
+        harness_id: str, request: HarnessResumeRequest
+    ) -> dict[str, Any]:
+        # Resolve harness from registry.
+        records = {r["id"]: r for r in harness_registry.list()}
+        record = records.get(harness_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="Harness not found")
+        if record.get("status") == "running":
+            raise HTTPException(
+                status_code=409,
+                detail="Harness is already running. Stop it before resuming a past run.",
+            )
+
+        # Validate source run's recorded agent matches this harness.
+        source_meta = manager._load_meta(request.source_run_id)
+        if source_meta is None:
+            raise HTTPException(status_code=404, detail="source run not found")
+        source_agent = (source_meta.get("agent") or {}) if isinstance(source_meta.get("agent"), dict) else {}
+        source_agent_name = source_agent.get("name")
+        if source_agent_name and source_agent_name != record.get("name"):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Selected harness '{record.get('name')}' does not match the source run's "
+                    f"agent '{source_agent_name}'. Connect the matching agent to resume."
+                ),
+            )
+
+        agent_info = {
+            "harness_id": harness_id,
+            "name": record.get("name"),
+            "model": record.get("model"),
+            "metadata": record.get("metadata") or {},
+        }
+        # Mint a fresh branched run_id based on the harness name (mirrors PokemonAgent._new_run_id).
+        import uuid as _uuid
+        agent_name_for_id = (record.get("name") or "agent").lower().replace(" ", "-")
+        new_run_id = f"{agent_name_for_id}-{_uuid.uuid4().hex[:8]}"
+
+        result = await manager.resume_from_checkpoint(
+            source_run_id=request.source_run_id,
+            checkpoint_name=request.checkpoint_name,
+            agent_info=agent_info,
+            new_run_id=new_run_id,
+        )
+        # Wake the agent with a command carrying the new + source run + checkpoint name.
+        harness_registry.update(harness_id, status="running", error=None)
+        harness_registry.enqueue(
+            harness_id,
+            f"resume_run:{new_run_id}:{request.source_run_id}:{request.checkpoint_name}",
+        )
+        return {"ok": True, **result}
 
     @api.get("/api/harness/{harness_id}/poll")
     async def harness_poll(harness_id: str) -> dict[str, Any]:

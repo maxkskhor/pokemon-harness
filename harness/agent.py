@@ -50,6 +50,10 @@ class PokemonAgent:
         # load_state:<name> command back via the control WS. Track the most recent
         # local restore so we ignore that echo (dedup window: 5 s).
         self._last_local_load: tuple[str, float] | None = None
+        # Tracked separately from the ContextVar `_current_turn_id` so the control
+        # thread can synthesize a `turn_finished` event if Stop tears down the
+        # session while the run thread is mid-turn.
+        self._active_turn_id: str | None = None
 
     # ── public API your run() calls ───────────────────────────────────
 
@@ -147,6 +151,7 @@ class PokemonAgent:
         self._turn_counter += 1
         tid = turn_id or f"turn-{self._turn_counter:03d}"
         token = _current_turn_id.set(tid)
+        self._active_turn_id = tid
 
         frame: int | None = None
         try:
@@ -191,6 +196,11 @@ class PokemonAgent:
                 pass
             self._emit_safe("turn_finished", finish_payload, turn_id=tid)
             _current_turn_id.reset(token)
+            # Used only by the control thread's stop branch to synthesize a
+            # turn_finished if the run thread is killed mid-turn. Clearing here
+            # so that case sees `None` once we've emitted the real one.
+            if self._active_turn_id == tid:
+                self._active_turn_id = None
 
     # ── override these to make checkpoints carry agent context ───────
 
@@ -332,11 +342,43 @@ class PokemonAgent:
             elif cmd == "stop":
                 self._stop_event.set()
                 self._emit_safe("lifecycle", {"status": "stop_requested"})
+                # 30 s lets a typical mid-flight LLM call complete so the run
+                # thread can exit its current `turn()` block cleanly, emitting
+                # `turn_finished` while the env session is still alive.
                 if run_thread and run_thread.is_alive():
-                    run_thread.join(timeout=10)
+                    run_thread.join(timeout=30)
+                # If the run thread didn't exit in time and a turn is still
+                # marked active, synthesize `turn_finished` ourselves so the UI
+                # doesn't leave the turn stuck on "running". Do this BEFORE
+                # stop_run so the event reaches the env's trace store.
+                if run_thread and run_thread.is_alive() and self._active_turn_id is not None:
+                    stuck_tid = self._active_turn_id
+                    self._emit_safe(
+                        "turn_finished",
+                        {
+                            "turn_id": stuck_tid,
+                            "turn_index": self._turn_counter,
+                            "status": "aborted",
+                            "error": "stop requested while turn in progress",
+                        },
+                        turn_id=stuck_tid,
+                    )
+                    self._active_turn_id = None
                 run_thread = None
+                # Snapshot the current emulator + agent state so this run can be
+                # resumed later from the View Run picker. Best-effort: never fail
+                # Stop because the snapshot didn't write.
                 try:
-                    self._client.pause_run()
+                    self.save_state("_auto_resume")
+                except Exception as exc:
+                    self._emit_safe(
+                        "warning",
+                        {"message": f"auto-resume snapshot failed: {exc}"},
+                    )
+                # Fully terminate the env session so a subsequent Play on a
+                # different harness does not silently inherit this session.
+                try:
+                    self._client.stop_run()
                 except Exception:
                     pass
                 self._set_status("idle")
@@ -349,6 +391,16 @@ class PokemonAgent:
                 run_thread = None
                 try:
                     self._client.stop_run()
+                except Exception:
+                    pass
+                # Reset = "throw it away". Discard the auto-resume snapshot from
+                # every past run that bears this agent's name so the UI label
+                # flips back to "Start agent" instead of "Resume agent".
+                try:
+                    for r in self._client.list_runs():
+                        agent_info = r.get("agent") or {}
+                        if agent_info.get("name") == self.name:
+                            self._client.delete_run_state(r["run_id"], "_auto_resume")
                 except Exception:
                     pass
                 self._turn_counter = 0
@@ -371,6 +423,47 @@ class PokemonAgent:
                     continue
                 if sidecar:
                     self._apply_agent_state(name, sidecar, source="ws")
+
+            elif cmd.startswith("resume_run:"):
+                # Server has already minted the new run, opened a session, and loaded
+                # the source checkpoint into the emulator. We just need to adopt the
+                # new run_id, restore agent history from the sidecar, and kick off run().
+                parts = cmd.split(":", 3)
+                if len(parts) < 4:
+                    self._emit_safe("warning", {"message": f"malformed resume_run cmd: {cmd}"})
+                    continue
+                _, new_run_id, source_run_id, checkpoint_name = parts
+                # Tear down any in-progress run thread first.
+                self._stop_event.set()
+                if run_thread and run_thread.is_alive():
+                    run_thread.join(timeout=10)
+                run_thread = None
+                self._stop_event.clear()
+                self._run_id = new_run_id
+                self._turn_counter = 0
+                try:
+                    sidecar = self._client.read_agent_state(source_run_id, checkpoint_name)
+                except Exception as exc:
+                    sidecar = None
+                    self._emit_safe(
+                        "warning",
+                        {"message": f"resume_run sidecar fetch failed: {exc}"},
+                    )
+                if sidecar:
+                    self._apply_agent_state(checkpoint_name, sidecar, source="resume")
+                self._emit_safe(
+                    "lifecycle",
+                    {
+                        "status": "run_resumed_from_checkpoint",
+                        "run_id": new_run_id,
+                        "parent_run_id": source_run_id,
+                        "checkpoint": checkpoint_name,
+                    },
+                )
+                self._client.set_speed("1x")
+                self._set_status("running")
+                run_thread = threading.Thread(target=self._run_wrapped, daemon=True)
+                run_thread.start()
 
     def _prepare_run_for_play(self) -> None:
         try:
@@ -418,10 +511,16 @@ class PokemonAgent:
             self.run()
             self._emit_safe("lifecycle", {"status": "agent_loop_finished"})
         except Exception as exc:
-            full_tb = traceback.format_exc()
-            self._set_error(str(exc))
-            print(full_tb, end="", file=sys.stderr)
-            self._emit_safe("error", {"message": str(exc), "traceback": full_tb})
+            # If Stop was requested, the run thread may have raised because the env
+            # session was torn down (e.g. press() got 404 mid-turn). That's an
+            # expected shutdown, not an error worth surfacing.
+            if self._stop_event.is_set():
+                self._emit_safe("lifecycle", {"status": "agent_loop_aborted_on_stop"})
+            else:
+                full_tb = traceback.format_exc()
+                self._set_error(str(exc))
+                print(full_tb, end="", file=sys.stderr)
+                self._emit_safe("error", {"message": str(exc), "traceback": full_tb})
         finally:
             self._set_status("idle")
 

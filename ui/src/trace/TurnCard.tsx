@@ -40,9 +40,12 @@ function buildTurnSummary(turn_id: string, events: TraceEvent[]): TurnSummary {
   }
 
   const elapsed_ms = (finished?.payload.elapsed_ms as number | null) ?? null;
+  // Use the *start* frame for the thumbnail so it stays stable across the turn's
+  // in-progress→ok transition. This is the frame the agent observed when it called
+  // the LLM, which is what the screenshot represents.
   const frame =
-    (finished?.payload.frame as number | null) ??
     (started?.payload.frame as number | null) ??
+    (finished?.payload.frame as number | null) ??
     null;
 
   const decisionEvent = events.find((e) => e.type === "decision");

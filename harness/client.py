@@ -106,6 +106,24 @@ class PokemonEnvClient:
     def read_agent_state(self, run_id: str, name: str) -> dict[str, Any]:
         return self._get(f"/api/runs/{run_id}/states/{name}/agent")
 
+    def delete_run_state(self, run_id: str, name: str) -> None:
+        """Best-effort delete of a run-local save state. Silent if absent."""
+        try:
+            response = self.client.delete(f"/api/runs/{run_id}/states/{name}")
+            if response.status_code not in (200, 404):
+                response.raise_for_status()
+        except Exception:
+            pass
+
+    def list_runs(self) -> list[dict[str, Any]]:
+        try:
+            response = self.client.get("/api/runs")
+            response.raise_for_status()
+            data = response.json()
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
+
     def emit(
         self,
         event_type: str,

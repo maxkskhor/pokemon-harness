@@ -326,6 +326,98 @@ class RuntimeManager:
             session.playback_task = asyncio.create_task(self._playback_loop(session))
         return {"run_id": session.run_id}
 
+    async def resume_from_checkpoint(
+        self,
+        *,
+        source_run_id: str,
+        checkpoint_name: str,
+        agent_info: dict[str, Any],
+        new_run_id: str,
+    ) -> dict[str, Any]:
+        """Branch a fresh run from a saved checkpoint of `source_run_id`.
+
+        Validates source run + checkpoint exist; starts a new emulator session
+        under `new_run_id`; loads the source `.state` file directly; writes the
+        new run's `meta.json` with `parent_run_id` + `parent_checkpoint`; returns
+        the agent_state sidecar (if any) so the caller can ship it to the agent.
+        """
+        safe_source = self._safe_name(source_run_id, "source_run_id")
+        source_meta = self._load_meta(safe_source)
+        if source_meta is None:
+            raise HTTPException(status_code=404, detail=f"source run not found: {source_run_id}")
+        state_path = self._state_path(safe_source, checkpoint_name)
+        if not state_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"checkpoint '{checkpoint_name}' not found for run {source_run_id}",
+            )
+        sidecar_path = self._agent_state_path(safe_source, checkpoint_name)
+        agent_state: dict[str, Any] | None = None
+        if sidecar_path.exists():
+            try:
+                agent_state = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            except Exception:
+                logger.exception("malformed agent state sidecar at %s", sidecar_path)
+                agent_state = None
+
+        if self.session is not None:
+            await self.stop_run()
+
+        rom_meta = source_meta.get("rom") or {}
+        rom_filename = rom_meta.get("filename") if isinstance(rom_meta, dict) else None
+        rom_path = (default_rom_path() if not rom_filename else Path(rom_filename))
+        if rom_path is None or not rom_path.exists():
+            rom_path = default_rom_path()
+        if rom_path is None or not rom_path.exists():
+            raise HTTPException(status_code=400, detail="No ROM available to resume run.")
+        sym_path = default_symbol_path(rom_path)
+        self.trace_store.reset_run(new_run_id)
+        symbols = parse_sym_file(sym_path)
+        emulator = self.emulator_factory(rom_path, sym_path)
+        session = Session(
+            run_id=new_run_id,
+            rom_path=rom_path,
+            sym_path=sym_path,
+            symbols=symbols,
+            emulator=emulator,
+            trace_store=self.trace_store,
+            broker=self.broker,
+        )
+        self.session = session
+        session.playback_task = asyncio.create_task(self._playback_loop(session))
+        async with session.lock:
+            session.emulator.load_state(state_path)
+            session.invalidate_screen_cache()
+            state_payload = session.state_payload()
+
+        # Write new run meta with parent linking.
+        self._write_meta(session, agent_info=agent_info, start_state=None)
+        self._patch_meta(
+            new_run_id,
+            {
+                "parent_run_id": safe_source,
+                "parent_checkpoint": checkpoint_name,
+            },
+        )
+        await session.emit_env("run_started", {"rom": session.rom_metadata})
+        await session.emit_env(
+            "state_loaded",
+            {
+                "name": checkpoint_name,
+                "path": str(state_path),
+                "frame": state_payload["frame"],
+                "agent_state": agent_state,
+                "source_run_id": safe_source,
+            },
+        )
+        return {
+            "run_id": new_run_id,
+            "parent_run_id": safe_source,
+            "parent_checkpoint": checkpoint_name,
+            "agent_state": agent_state,
+            "frame": state_payload["frame"],
+        }
+
     async def state(self) -> dict[str, Any]:
         session = self._require_session()
         async with session.lock:
@@ -559,11 +651,21 @@ class RuntimeManager:
             if not env_path.exists() and not harness_path.exists():
                 continue
             stat = run_dir.stat()
+            run_states_dir = self.states_dir / self._safe_name(run_dir.name, "run_id")
+            has_checkpoints = run_states_dir.exists() and any(
+                p.suffix == ".state" and p.is_file() for p in run_states_dir.iterdir()
+            )
+            # _auto_resume is written specifically by Stop and cleared by Reset.
+            # The UI uses it (not has_checkpoints) to decide Start vs Resume so that
+            # stray user-saved checkpoints don't change the primary-action label.
+            has_auto_resume = (run_states_dir / "_auto_resume.state").exists()
             entry: dict[str, Any] = {
                 "run_id": run_dir.name,
                 "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
                 "has_env": env_path.exists(),
                 "has_harness": harness_path.exists(),
+                "has_checkpoints": has_checkpoints,
+                "has_auto_resume": has_auto_resume,
                 "active": run_dir.name == active_run_id,
                 "bytes": _directory_size(run_dir),
             }
@@ -577,6 +679,8 @@ class RuntimeManager:
                 entry["agent"] = meta.get("agent")
                 entry["rom"] = meta.get("rom")
                 entry["start_state"] = meta.get("start_state")
+                entry["parent_run_id"] = meta.get("parent_run_id")
+                entry["parent_checkpoint"] = meta.get("parent_checkpoint")
             out.append(entry)
         out.sort(key=lambda entry: entry["modified_at"], reverse=True)
         return out

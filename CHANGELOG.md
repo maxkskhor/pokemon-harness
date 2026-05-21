@@ -1,5 +1,49 @@
 # Changelog
 
+## 2026-05-21 (verification-feedback fixes)
+
+### Fixed
+- `ui/src/App.tsx` — On page reload, auto-select the harness whose `name` matches the active run's recorded agent (one-shot, via `autoSelectAttemptedRef`). Resolves the issue where Stop was disabled after reload because the dropdown defaulted to the first agent instead of the running one. Per AGENTS.md, Stop only targets the dropdown selection.
+- `ui/src/App.tsx` — WebSocket handler treats `run_stopped` as an explicit teardown: clears local state, image version, and event run id directly. Eliminates the post-Stop `GET /api/state` and `GET /api/screenshot.png` 404s that previously appeared in the browser console after the env session closed.
+
+### Changed
+- `verify.md` — Updated wording: button labels no longer require literal `▶`/`↺` glyphs (UI uses lucide-react SVG icons); the post-resume run picker label is correctly `View run: Active – <id>`. Added a triage section labelling each item from the manual-verification feedback as FIXED / DOCS-UPDATED / WONT-FIX.
+
+## 2026-05-21 (verification notes)
+
+### Added
+- `verify.md` — recorded local UI verification results for the resume/start/stop/reset checklist, including passing flows, incomplete checks, and follow-up issues found during browser testing.
+
+## 2026-05-21 (resume-from-run polish)
+
+### Added
+- `env/runtime.py` — `list_runs()` now emits `has_auto_resume` (specifically tracks the Stop snapshot, not any save state). Drives the UI's Start↔Resume label so stray user-saved checkpoints don't change the primary action.
+- `harness/agent.py` — Tracks `_active_turn_id` so the control thread can synthesize a `turn_finished` event if Stop fires while the run thread is mid-turn (UI no longer leaves the turn stuck on "running").
+- `harness/client.py` — `delete_run_state()` (best-effort) and `list_runs()` helpers used by Reset.
+
+### Changed
+- `harness/agent.py` — Stop join timeout raised from 10 s to 30 s so a typical mid-flight LLM call has time to finish, the `turn()` block runs its `finally`, and `turn_finished` reaches the env while the session is still alive.
+- `harness/agent.py` — `_run_wrapped()` suppresses error emission when `_stop_event` is already set; the resulting 404 from a press after `stop_run()` is an expected shutdown signal, not a user-visible error.
+- `harness/agent.py` — Reset now wipes `_auto_resume` for every past run belonging to this agent's name (not just the current run id), so the UI primary action flips back to "Start agent".
+- `ui/src/App.tsx` — Primary action button now reads "Start agent" (no resumable state) or "Resume agent" (selected agent has a stopped run with `has_auto_resume`); resume defaults to the auto-snapshot of that most-recent run. Stop and Reset re-fetch run history so the label updates immediately.
+- `ui/src/trace/TurnCard.tsx` — Thumbnail uses the turn's start frame (not finish frame) so the image stays stable instead of switching when the turn transitions from running→ok.
+
+## 2026-05-21 (resume from a previous run)
+
+### Added
+- `env/app.py` — `POST /api/harness/{id}/resume_run` endpoint that branches a fresh run from a saved checkpoint of a past run; validates that the selected harness's agent name matches the source run's recorded agent.
+- `env/runtime.py` — `RuntimeManager.resume_from_checkpoint()` opens a new session under a fresh `run_id`, loads the source run's `.state` directly, and writes `parent_run_id` + `parent_checkpoint` into the new meta.
+- `env/runtime.py` — `list_runs()` now emits `has_checkpoints`, `parent_run_id`, and `parent_checkpoint` for each entry.
+- `env/models.py` — `HarnessResumeRequest` Pydantic model.
+- `harness/agent.py` — Control-loop handler for the new `resume_run:<new>:<source>:<checkpoint>` command; restores agent history from the source's `.agent.json` sidecar before spawning the run thread.
+- `ui/src/api.ts` — `resumeHarness()` client + `has_checkpoints`/`parent_run_id`/`parent_checkpoint` fields on `RunSummary`.
+- `ui/src/App.tsx` — When viewing a past run, the Play button re-labels to **Resume agent** and disables with a tooltip until the dropdown selects the matching agent; clicking it branches a new run from `_auto_resume` (or the newest checkpoint if no auto-snapshot exists).
+- `ui/src/run-picker/RunPicker.tsx` + `styles.css` — `↺` badge on past runs that have saved checkpoints.
+
+### Changed
+- `harness/agent.py` — Stop command now writes an `_auto_resume` snapshot (emulator + agent history) and calls `stop_run()` (was `pause_run()`). This terminates the env session so switching harnesses no longer lets the new agent silently inherit the previous session's state.
+- `ui/src/App.tsx` — `handleSelectRun` now refreshes checkpoints and frames when a past run is selected, so the Checkpoints sidebar reflects the viewed run instead of staying empty.
+
 ## 2026-05-19 (abstract frames from agent API)
 
 ### Changed

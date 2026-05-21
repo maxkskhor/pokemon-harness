@@ -95,7 +95,12 @@ export function RunPicker({
                     className={viewedRunId === entry.run_id ? "run-row selected" : "run-row"}
                     onClick={() => { onSelectRun(entry.run_id); setOpen(false); }}
                   >
-                    <td className="run-id-cell" title={entry.run_id}>{entry.run_id}</td>
+                    <td className="run-id-cell" title={entry.run_id}>
+                      {entry.run_id}
+                      {entry.has_checkpoints ? (
+                        <span className="run-resumable-badge" title="Has saved checkpoints — can be resumed">↺</span>
+                      ) : null}
+                    </td>
                     <td><StatusBadge status={entry.status} active={false} /></td>
                     <td>{entry.agent?.name ?? "–"}</td>
                     <td>{entry.agent?.model ?? "–"}</td>

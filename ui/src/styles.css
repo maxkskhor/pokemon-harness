@@ -1315,3 +1315,12 @@ select {
   background: #fde0d8;
   color: #8b1a1a;
 }
+
+.run-resumable-badge {
+  margin-left: 6px;
+  display: inline-block;
+  font-size: 11px;
+  color: #1a5c3a;
+  font-family: ui-monospace, monospace;
+  font-weight: 700;
+}
