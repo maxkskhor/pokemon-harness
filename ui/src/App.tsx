@@ -78,24 +78,11 @@ export function App() {
     : null;
   const isViewingPastRun = viewedRunId !== null;
 
-  // When viewing the live area (not a past run), surface the *latest* stopped run
-  // for the selected agent that has an auto-resume snapshot. That snapshot is
-  // written by Stop and cleared by Reset, so it's the right signal for the
-  // primary action's Start↔Resume label.
-  const resumableRun = !isViewingPastRun && selectedHarness
-    ? runHistory.find(
-        (r) =>
-          !r.active &&
-          r.has_auto_resume === true &&
-          (r.agent?.name ?? null) === selectedHarness.name,
-      ) ?? null
-    : null;
-
-  // Final intent for the primary action button. Three states:
-  //   "start"  – no resumable state, click starts fresh from `bedroom`.
-  //   "resume" – there is a resumable past run; click branches from `_auto_resume`.
-  //   (when viewing a past run, isViewingPastRun forces "resume" on the viewed run.)
-  const primaryIntent: "start" | "resume" = isViewingPastRun || resumableRun ? "resume" : "start";
+  // Primary action label is driven solely by the View Run picker:
+  //   "start"  – dropdown selection only; click starts fresh from `bedroom`.
+  //   "resume" – user explicitly picked a past run; click branches from that run's checkpoint.
+  // Changing the agent in the dropdown must never silently imply resume.
+  const primaryIntent: "start" | "resume" = isViewingPastRun ? "resume" : "start";
 
   const viewedRunHasCheckpoint = runStates.length > 0;
   const viewedRunAgentName = viewedRunSummary?.agent?.name ?? null;
@@ -158,34 +145,39 @@ export function App() {
         // trace they're inspecting doesn't shift under them.
         const viewingPast = viewedRunIdRef.current !== null && viewedRunIdRef.current !== event.run_id;
 
+        // Handle run_stopped as an explicit teardown and return early. If we fell
+        // through to the "new-run-detected" block below, it would re-anchor
+        // eventRunIdRef to the just-stopped run id and race with any in-flight
+        // refreshState — leaving the UI showing "Active – <stopped-id>" until reload.
+        if (event.source === "env" && event.type === "run_stopped") {
+          setState(null);
+          setImageVersion(0);
+          eventRunIdRef.current = null;
+          void refreshRunHistory();
+          if (!viewingPast) {
+            setEvents((current) => [...current.slice(-499), event]);
+          }
+          return;
+        }
+
         if (event.source === "env") {
-          if (event.type === "run_stopped") {
-            // The env session is gone. Clear local state directly instead of
-            // re-fetching — /api/state and /api/screenshot.png will 404 once the
-            // session is None, and browsers log those even when we catch them.
-            setState(null);
-            setImageVersion(0);
-            eventRunIdRef.current = null;
+          setImageVersion((version) => version + 1);
+          // playback_frame fires every 0.1s — skip full state refresh, image bump is enough
+          if (event.type !== "playback_frame") {
+            void refreshState(false);
+          }
+          if (event.type === "state_saved" || event.type === "state_loaded") {
+            void refreshCheckpoints(event.run_id);
+          }
+          if (event.type === "run_started") {
             void refreshRunHistory();
-          } else {
-            setImageVersion((version) => version + 1);
-            // playback_frame fires every 0.1s — skip full state refresh, image bump is enough
-            if (event.type !== "playback_frame") {
-              void refreshState(false);
-            }
-            if (event.type === "state_saved" || event.type === "state_loaded") {
-              void refreshCheckpoints(event.run_id);
-            }
-            if (event.type === "run_started") {
-              void refreshRunHistory();
-            }
-            if (event.frame != null) {
-              setFrameNumbers((current) => {
-                const frame = event.frame as number;
-                if (current.includes(frame)) return current;
-                return [...current, frame].sort((a, b) => a - b);
-              });
-            }
+          }
+          if (event.frame != null) {
+            setFrameNumbers((current) => {
+              const frame = event.frame as number;
+              if (current.includes(frame)) return current;
+              return [...current, frame].sort((a, b) => a - b);
+            });
           }
         }
 
@@ -266,8 +258,14 @@ export function App() {
   }
 
   async function refreshState(updateImage = true) {
+    // Capture the active run at fetch-start. If run_stopped clears eventRunIdRef
+    // while the fetch is in flight, drop the result — the backend's session is
+    // briefly still alive between `emit_env("run_stopped")` and `self.session = None`,
+    // so a late resolve here would re-populate state with the just-stopped run.
+    const expectedRunId = eventRunIdRef.current;
     try {
       const next = await getState();
+      if (expectedRunId !== null && eventRunIdRef.current === null) return;
       setState(next);
       if (updateImage) setImageVersion((v) => v + 1);
     } catch {
@@ -400,10 +398,9 @@ export function App() {
     if (!selectedHarnessId) return;
     await runAction(async () => {
       const result = await stopHarness(selectedHarnessId);
-      // The agent writes `_auto_resume` on stop. Refresh runHistory so the
-      // primary action below flips to "Resume agent".
-      // Give the agent's control loop a beat to finish save_state before we
-      // re-read state (it runs after run_thread.join).
+      // The agent writes `_auto_resume` on stop (used when the user later picks
+      // this run in the View Run picker). Give the control loop a beat to finish
+      // save_state before re-reading run history.
       await new Promise((resolve) => setTimeout(resolve, 500));
       await refreshRunHistory();
       return result;
@@ -414,8 +411,6 @@ export function App() {
     if (!selectedHarnessId) return;
     await runAction(async () => {
       const result = await resetHarness(selectedHarnessId);
-      // Reset wipes auto_resume snapshots for this agent. Re-read runHistory
-      // so the primary action below flips back to "Start agent".
       await new Promise((resolve) => setTimeout(resolve, 500));
       await refreshRunHistory();
       return result;
@@ -423,20 +418,13 @@ export function App() {
   }
 
   async function handleHarnessResume() {
-    if (!selectedHarnessId) return;
-    // Source run = the one being viewed (if user picked a past run) or the most
-    // recent resumable run for the selected agent (resume-after-stop flow).
-    const sourceRunId = viewedRunId ?? resumableRun?.run_id ?? null;
-    if (!sourceRunId) return;
-    // Default to the auto-snapshot. For live-resume we just pass "_auto_resume"
-    // by name; the server validates it exists. For past-run-resume we additionally
-    // honor whatever the user has in the Checkpoints panel as a fallback.
-    let checkpoint = "_auto_resume";
-    if (viewedRunId) {
-      const auto = runStates.find((s) => s.name === "_auto_resume");
-      const fallback = runStates[0];
-      checkpoint = (auto ?? fallback)?.name ?? checkpoint;
-    }
+    if (!selectedHarnessId || !viewedRunId) return;
+    // Resume only fires from the View Run picker — source = viewed run, checkpoint
+    // = the run's auto-snapshot if present, else the newest user checkpoint.
+    const auto = runStates.find((s) => s.name === "_auto_resume");
+    const fallback = runStates[0];
+    const checkpoint = (auto ?? fallback)?.name ?? "_auto_resume";
+    const sourceRunId = viewedRunId;
     await runAction(async () => {
       const result = await resumeHarness(selectedHarnessId, {
         source_run_id: sourceRunId,
@@ -576,12 +564,7 @@ export function App() {
                     || selectedHarness.status === "running"
                     || selectedHarness.status === "disconnected"
                   }
-                  title={
-                    resumeBlocker
-                    ?? (isViewingPastRun
-                      ? "Resume this run from its latest checkpoint"
-                      : `Resume ${resumableRun?.run_id ?? "this agent"} from its auto-snapshot`)
-                  }
+                  title={resumeBlocker ?? "Resume this run from its latest checkpoint"}
                 >
                   <History size={14} /> Resume agent
                 </button>

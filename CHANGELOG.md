@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-05-21 (run_stopped UI race)
+
+### Fixed
+- `ui/src/App.tsx` — WebSocket `run_stopped` handler now returns early after clearing state. Previously it fell through to the "new-run-detected" block, which re-anchored `eventRunIdRef.current` to the just-stopped run id. Combined with the race below, this left the View Run picker showing "Active – <stopped-id>" for several seconds after Stop until the next reload.
+- `ui/src/App.tsx` — `refreshState` now captures `eventRunIdRef.current` at fetch-start and drops the result if `run_stopped` cleared it during the await. Without this guard, a late-resolving `getState()` from the `state_saved` event (emitted just before `run_stopped` while writing `_auto_resume`) repopulated state with the just-stopped run's data, because the backend leaves `self.session` set until after `emit_env("run_stopped")` returns.
+
+## 2026-05-21 (Start/Resume label fix)
+
+### Fixed
+- `ui/src/App.tsx` — Dropping an agent in the dropdown no longer flips the primary action to "Resume agent". The label is now driven solely by the View Run picker: dropdown selection → "Start agent" (fresh run from `bedroom`); past run picked in View Run → "Resume agent" (branches from that run's checkpoint). The previous `resumableRun` auto-detection (any past stopped run with `_auto_resume` matching the selected agent's name) was silently hijacking new-run intent when an old snapshot for the same agent name still existed.
+
+### Changed
+- `ui/src/App.tsx` — `handleHarnessResume` now requires `viewedRunId`; the resume-after-Stop shortcut goes through the View Run picker instead. Stop still writes `_auto_resume` so the run remains resumable from the picker.
+
 ## 2026-05-21 (verification-feedback fixes)
 
 ### Fixed
