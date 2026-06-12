@@ -54,6 +54,17 @@ def test_blackout_triggers_rollback_to_last_checkpoint() -> None:
     assert any(e[0] == "rollback" for e in events)
 
 
+def test_fainting_in_battle_is_not_a_blackout() -> None:
+    meta, events, _, loaded = make_meta()
+    meta.observe(overworld(37, party=healthy()), 0.0)
+    # Lead faints DURING a battle — must not be treated as a wipe/rollback.
+    fainted = [{"slot": 1, "level": 5, "hp": 0, "max_hp": 20}]
+    verdict = meta.observe({"map_id": 40, "party": fainted, "badges": [], "battle": {"kind": "trainer"}}, 0.0)
+    assert verdict["rolled_back"] is False
+    assert meta.state.wipe_pending is False
+    assert loaded == []
+
+
 def test_rollback_is_bounded_per_milestone() -> None:
     meta, events, _, loaded = make_meta(rollback_after_turns=2, max_rollbacks_per_milestone=1)
     meta.observe(overworld(37), 0.0)

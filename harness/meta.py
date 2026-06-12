@@ -232,8 +232,18 @@ class MetaHarness:
         # Wipe recovery takes precedence over milestone scanning: a blackout
         # respawn can land on a milestone map (e.g. back in Pallet Town) and
         # must not be celebrated as progress.
+        #
+        # Ignore fainting *during* a battle: a Pokemon at 0 HP mid-fight (or a
+        # lost battle) is not a blackout — Gen 1 only blacks you out when the
+        # whole party is down in the overworld. Treating the rival-battle loss
+        # as a wipe would roll back and discard a freshly caught starter.
         party = _party(status)
-        all_fainted = bool(party) and all((mon.get("hp") or 0) == 0 for mon in party)
+        in_battle = bool(status.get("battle"))
+        all_fainted = (
+            bool(party)
+            and not in_battle
+            and all((mon.get("hp") or 0) == 0 for mon in party)
+        )
         if all_fainted and not s.wipe_pending:
             s.wipe_pending = True
             self._emit("warning", {"message": "party wiped — blackout incoming"})
