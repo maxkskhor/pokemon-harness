@@ -237,17 +237,20 @@ class MetaHarness:
         # lost battle) is not a blackout — Gen 1 only blacks you out when the
         # whole party is down in the overworld. Treating the rival-battle loss
         # as a wipe would roll back and discard a freshly caught starter.
-        party = _party(status)
+        # Only count genuinely owned Pokemon (level >= 1): a mid-acquisition
+        # party-count flicker leaves a level-0 / species "#0" slot with 0 HP
+        # that would otherwise read as a wipe.
+        real_party = [mon for mon in _party(status) if (mon.get("level") or 0) >= 1]
         in_battle = bool(status.get("battle"))
         all_fainted = (
-            bool(party)
+            bool(real_party)
             and not in_battle
-            and all((mon.get("hp") or 0) == 0 for mon in party)
+            and all((mon.get("hp") or 0) == 0 for mon in real_party)
         )
         if all_fainted and not s.wipe_pending:
             s.wipe_pending = True
             self._emit("warning", {"message": "party wiped — blackout incoming"})
-        elif s.wipe_pending and party and any((mon.get("hp") or 0) > 0 for mon in party):
+        elif s.wipe_pending and real_party and any((mon.get("hp") or 0) > 0 for mon in real_party):
             s.wipe_pending = False
             rolled = self._rollback("blacked out (party wipe)")
             return {

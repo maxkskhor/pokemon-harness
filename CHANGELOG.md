@@ -40,6 +40,18 @@
   no-op (Gen 1 often spends the first press just turning to face a direction); learned
   walls are dropped when a tile reports all four sides blocked (an input-lock artifact,
   not real geometry).
+- `harness/meta.py` — `get-starter` milestone gated on a real (level >= 1) Pokemon, not
+  the raw `wPartyCount` byte which flickers to 1 mid-acquisition; and in-battle fainting
+  is no longer treated as a blackout (Gen 1 only blacks out in the overworld), so losing
+  the rival fight recovers to "have starter" instead of rolling back past the lab.
+
+### Observed live (gpt-5-nano, ~$0.05/M in)
+Across runs the agent autonomously leaves the bedroom (turn 1-4), exits to Pallet Town
+(turn 3-8), and obtains its starter from Oak's lab (turn ~19, ~$0.005). The meta-harness
+fires milestone checkpoints, recovers from navigation loops via rollback, and the battle
+macro beats the rival's Bulbasaur. Reaching Brock unattended in a single run is not
+reliable at this model tier — the harness is built for steady, observable, recoverable
+progress and easy model swaps (`POKEMON_AGENT_MODEL`) rather than a guaranteed clear.
 
 ## 2026-06-12 (Pokemon Fire Red, agent launcher, game status panel, replay)
 
