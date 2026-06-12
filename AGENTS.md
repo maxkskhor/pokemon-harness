@@ -130,6 +130,24 @@ After completing any meaningful work, append an entry to `CHANGELOG.md`. Group b
 - `POKEMON_AGENT_MODEL` overrides the example agents' model.
 - The UI's Play sends an optional ROM; it's stored as `pending_rom` on the harness registry record and consumed by the next `/api/run/start` carrying that `harness_id`.
 
+## Gym Agent and the meta-harness
+
+- `harness/meta.py` owns the milestone list; the UI's `JourneyPanel` mirrors it by key.
+  **If you add/rename a milestone, update `ui/src/journey/JourneyPanel.tsx` too.**
+- Milestones are strictly ordered: the scan stops at the first unreached one, so a later
+  map can't fire early (Pewter City won't count while you're still in the bedroom).
+- Blackout (party wipe) detection runs BEFORE milestone scanning — a respawn can land on
+  a milestone map and must trigger rollback, not celebration.
+- Rollback restores the milestone checkpoint's sidecar, which includes the meta state
+  itself (`MetaHarness.serialize` rides in `serialize_history`), so reached-milestone
+  bookkeeping rewinds consistently with the emulator.
+- `MAP_WARPS`/`MAP_CONNECTIONS` in `env/pokered_names.py` are mined from the
+  disassembly's map headers/objects by `scripts/generate_pokered_names.py`. Exit
+  coordinates in observations cut bedroom escape from 11 turns to 4 — prefer extending
+  this static knowledge over adding live tile probing.
+- `gpt-5-nano` defaults to ~14 s/turn of hidden reasoning; the agent passes
+  `extra_body={"reasoning": {"effort": "low"}}` to keep turns fast and cheap.
+
 ## LLM agent prompting
 
 Models default to pressing A when given a vague prompt. To get movement, explicitly tell the model to prefer direction buttons and only press A for dialogue/menus. See `harness/examples/first_agent.py` for the working prompt.

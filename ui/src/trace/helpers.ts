@@ -12,7 +12,13 @@ export const NOISY_EVENT_TYPES = new Set(["playback_frame"]);
 export function eventCategory(event: TraceEvent): FilterType {
   switch (event.type) {
     case "decision":
+    case "milestone":
       return "decision";
+    case "rollback":
+    case "budget_exceeded":
+      return "warning";
+    case "observation":
+      return "state";
     case "llm_call":
       return "llm";
     case "action":
@@ -93,6 +99,19 @@ export function summarizeEvent(event: TraceEvent): string {
   if (event.type === "decision") {
     const action = payload.action ?? payload.button ?? "-";
     return `Chose ${action}`;
+  }
+  if (event.type === "milestone") {
+    const index = typeof payload.index === "number" ? payload.index + 1 : "?";
+    return `🏁 MILESTONE ${index}/${payload.total ?? "?"}: ${payload.label ?? payload.key} (turn ${payload.turn ?? "?"})`;
+  }
+  if (event.type === "rollback") {
+    return `↩ rolled back to "${payload.checkpoint}" — ${payload.reason}`;
+  }
+  if (event.type === "budget_exceeded") {
+    return `budget exhausted: $${Number(payload.run_cost_usd ?? 0).toFixed(3)} of $${Number(payload.limit_usd ?? 0).toFixed(2)}`;
+  }
+  if (event.type === "observation" && typeof payload.text === "string") {
+    return payload.text.split("\n")[0];
   }
   if (event.type === "llm_call") {
     const usage = payload.usage as Record<string, unknown> | undefined;

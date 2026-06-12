@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-06-12 (Gym Agent + meta-harness: mission "Boulder Badge")
+
+### Added
+- `harness/examples/gym_agent.py` — **Gym Agent**, a harness built to make real progress:
+  rich RAM-derived text observations (location, party with moves/PP, both sides' battle HP),
+  deterministic `battle_move(slot)`/`run_away()` macros driven by live menu-cursor reads,
+  a learned per-map wall memory from failed moves, a persistent `note()` scratchpad, and
+  tool-calling with one action round per turn. Defaults to `openai/gpt-5-nano` with
+  low reasoning effort (fast + cheap); override via `POKEMON_AGENT_MODEL`.
+- `harness/meta.py` — **meta-harness** supervisor: a 12-milestone journey
+  (bedroom → ... → Boulder Badge) checked against RAM each turn, with per-milestone goal
+  prompts (curriculum), auto-checkpoint on every milestone, blackout (party-wipe) and
+  no-progress rollback to the last milestone checkpoint (bounded), model escalation when
+  stuck, and a hard budget. Emits `milestone`/`rollback` trace events.
+- **Static map knowledge mined from the disassembly**: `MAP_WARPS` (every door/stair/mat
+  tile and destination) and `MAP_CONNECTIONS` (outdoor edges) generated from
+  pret/pokered map headers/objects into `env/pokered_names.py`; surfaced as
+  `exits`/`connections` in `/api/state` status and fed to the agent — cut
+  leave-the-bedroom from 11 turns to 4.
+- `env/gamestate.py` — party moves with names + PP (`MOVE_NAMES` table) and full battle
+  block: enemy HP/max HP plus your active battle mon with moves/PP.
+- UI: dark "mission control" theme (full re-palette) and a `JourneyPanel` milestone
+  tracker (per-milestone dots with turn/cost tooltips, current-objective caption, spend).
+  `milestone`/`rollback`/`budget_exceeded`/`observation` events get trace summaries.
+- `harness/llm.py` — cost table refreshed against the OpenRouter models API (2026-06-12);
+  `qwen3.6-flash` had tripled in price; default workhorse is now `gpt-5-nano`
+  ($0.05/$0.40 per M) with `gpt-5-mini` as the escalation model.
+- Tests: `tests/test_meta.py` (milestone ordering, blackout rollback precedence over
+  milestone scanning, bounded rollbacks, escalation, budget, serialize round-trip).
+
 ## 2026-06-12 (Pokemon Fire Red, agent launcher, game status panel, replay)
 
 ### Added

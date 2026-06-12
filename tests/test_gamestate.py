@@ -38,14 +38,26 @@ def _build_memory() -> dict[int, int]:
     memory[mon] = 0xB0                             # species: Charmander (internal $B0)
     memory[mon + 1], memory[mon + 2] = 0, 17       # HP = 17
     memory[mon + 4] = 0x08                         # status: PSN
+    memory[mon + 8] = 33                           # move 1: Tackle
+    memory[mon + 9] = 45                           # move 2: Growl
+    memory[mon + 29] = 35                          # pp 1
+    memory[mon + 30] = (1 << 6) | 40               # pp 2 with one PP-Up bit set
     memory[mon + 33] = 9                           # level
     memory[mon + 34], memory[mon + 35] = 0, 27     # max HP = 27
     write(0xD2B5, _encode_text("FLAME"))           # wPartyMonNicks slot 1
 
     memory[0xD057] = 1                             # wIsInBattle -> wild
-    memory[0xCFE5] = 0xA5                          # wEnemyMonSpecies: Pidgey ($24)? use $A5 Pikachu? see assert
+    memory[0xCFE5] = 0xA5                          # wEnemyMonSpecies
     memory[0xCFF3] = 5                             # wEnemyMonLevel
     memory[0xCFE6], memory[0xCFE7] = 0, 11         # wEnemyMonHP = 11
+    memory[0xCFF4], memory[0xCFF5] = 0, 16         # wEnemyMonMaxHP = 16
+
+    memory[0xD014] = 0xB0                          # wBattleMon species: Charmander
+    memory[0xD015], memory[0xD016] = 0, 17         # wBattleMonHP
+    memory[0xD01C] = 10                            # wBattleMonMoves: Scratch
+    memory[0xD022] = 9                             # wBattleMonLevel
+    memory[0xD023], memory[0xD024] = 0, 27         # wBattleMonMaxHP
+    memory[0xD02D] = 30                            # wBattleMonPP slot 1
 
     return memory
 
@@ -66,6 +78,13 @@ _LABELS = {
     "wEnemyMonSpecies": 0xCFE5,
     "wEnemyMonLevel": 0xCFF3,
     "wEnemyMonHP": 0xCFE6,
+    "wEnemyMonMaxHP": 0xCFF4,
+    "wBattleMon": 0xD014,
+    "wBattleMonHP": 0xD015,
+    "wBattleMonMoves": 0xD01C,
+    "wBattleMonLevel": 0xD022,
+    "wBattleMonMaxHP": 0xD023,
+    "wBattleMonPP": 0xD02D,
 }
 
 
@@ -92,12 +111,20 @@ def test_read_game_status_full_snapshot() -> None:
     assert mon["hp"] == 17
     assert mon["max_hp"] == 27
     assert mon["status"] == "PSN"
+    assert mon["moves"] == [
+        {"slot": 1, "name": "Tackle", "pp": 35},
+        {"slot": 2, "name": "Growl", "pp": 40},
+    ]
 
     battle = status["battle"]
     assert battle is not None
     assert battle["kind"] == "wild"
     assert battle["enemy_level"] == 5
     assert battle["enemy_hp"] == 11
+    assert battle["enemy_max_hp"] == 16
+    assert battle["my"]["species"] == "Charmander"
+    assert battle["my"]["hp"] == 17
+    assert battle["my"]["moves"] == [{"slot": 1, "name": "Scratch", "pp": 30}]
 
 
 def test_read_game_status_no_party_no_battle() -> None:

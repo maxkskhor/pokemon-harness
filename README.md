@@ -77,6 +77,32 @@ scripts/setup_firered.sh
 
 Afterwards "POKEMON FIRE" appears in the UI's game dropdown. The script also creates a shared `bedroom-pokefirered` start state (post-intro, in the player's bedroom) so agents skip the long intro, mirroring the Red/Blue `bedroom` state.
 
+## The Gym Agent (mission: Boulder Badge)
+
+`gym_agent` is the strongest bundled harness — its mission is to reach Pewter City and
+beat Brock. It combines:
+
+- **Rich observations**: location, exits/connections mined from the disassembly, party
+  with moves and PP, and live battle HP for both sides — read from RAM every turn.
+- **Battle macros**: `battle_move(slot)` navigates the FIGHT menu deterministically
+  using the game's own cursor state.
+- **Memory**: a learned wall map per location, plus a persistent notes scratchpad that
+  survives checkpoints and rollbacks.
+- **A meta-harness** (`harness/meta.py`): a 12-milestone journey with per-milestone
+  goal prompts, an auto-checkpoint at every milestone, rollback on blackout or
+  prolonged lack of progress, model escalation when stuck, and a hard budget
+  (`POKEMON_BUDGET_USD`, default $2).
+
+The UI shows the journey as a 12-dot tracker with per-milestone cost.
+
+Model defaults (override with `POKEMON_AGENT_MODEL` / `POKEMON_ESCALATION_MODEL`):
+
+| Role | Model | $/M in / out |
+|---|---|---|
+| Workhorse | `openai/gpt-5-nano` | 0.05 / 0.40 |
+| Escalation (when stuck) | `openai/gpt-5-mini` | 0.25 / 2.00 |
+| Cheap alternates | `qwen/qwen3.5-flash-02-23`, `google/gemini-2.5-flash-lite` | ~0.07–0.10 in |
+
 ## Build Your Own Agent
 
 Create a subclass of `PokemonAgent`, set a name, and implement `run()`:

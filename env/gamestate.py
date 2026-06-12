@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from env.pokered_names import MAP_NAMES, SPECIES_NAMES
+from env.pokered_names import MAP_CONNECTIONS, MAP_NAMES, MAP_WARPS, MOVE_NAMES, SPECIES_NAMES
 from env.symbols import SymbolMap
 
 ReadByte = Callable[[int], int]
@@ -74,6 +74,23 @@ def _bit_count(read_byte: ReadByte, address: int, length: int) -> int:
     return sum(bin(read_byte(address + offset)).count("1") for offset in range(length))
 
 
+def _read_moves(read_byte: ReadByte, moves_addr: int, pp_addr: int) -> list[dict[str, Any]]:
+    """Four move slots: id list + PP list (top 2 PP bits are PP-Up count)."""
+    moves: list[dict[str, Any]] = []
+    for slot in range(4):
+        move_id = read_byte(moves_addr + slot)
+        if move_id == 0:
+            continue
+        moves.append(
+            {
+                "slot": slot + 1,
+                "name": MOVE_NAMES.get(move_id, f"#{move_id}"),
+                "pp": read_byte(pp_addr + slot) & 0x3F,
+            }
+        )
+    return moves
+
+
 def read_game_status(symbols: SymbolMap, read_byte: ReadByte) -> dict[str, Any]:
     """Read a human-oriented status snapshot: trainer, party, badges, battle."""
 
@@ -92,6 +109,24 @@ def read_game_status(symbols: SymbolMap, read_byte: ReadByte) -> dict[str, Any]:
     map_id = read_byte(map_addr) if map_addr is not None else None
     out["map_id"] = map_id
     out["map_name"] = MAP_NAMES.get(map_id) if map_id is not None else None
+    # Static map knowledge mined from the disassembly: warp tiles (doors,
+    # stairs, mats) and outdoor edge connections. Gold for navigation.
+    out["exits"] = [
+        {
+            "x": x,
+            "y": y,
+            "to": MAP_NAMES.get(dest, f"map {dest}") if dest is not None else "outside",
+        }
+        for x, y, dest in (MAP_WARPS.get(map_id) or [])
+    ] if map_id is not None else []
+    out["connections"] = (
+        {
+            direction: MAP_NAMES.get(dest, f"map {dest}")
+            for direction, dest in (MAP_CONNECTIONS.get(map_id) or {}).items()
+        }
+        if map_id is not None
+        else {}
+    )
 
     badges_addr = addr("wObtainedBadges")
     if badges_addr is not None:
@@ -147,6 +182,7 @@ def _read_party(symbols: SymbolMap, read_byte: ReadByte) -> list[dict[str, Any]]
                 "hp": hp,
                 "max_hp": max_hp,
                 "status": _status_condition(status_byte),
+                "moves": _read_moves(read_byte, mon + 8, mon + 29),
             }
         )
     return party
@@ -159,13 +195,37 @@ def _read_battle(symbols: SymbolMap, read_byte: ReadByte) -> dict[str, Any] | No
     battle_type = read_byte(in_battle_addr)
     if battle_type == 0:
         return None
-    species_addr = symbols.address("wEnemyMonSpecies")
-    hp_addr = symbols.address("wEnemyMonHP")
-    level_addr = symbols.address("wEnemyMonLevel")
-    enemy_species = read_byte(species_addr) if species_addr is not None else None
-    return {
+
+    def byte_at(label: str) -> int | None:
+        address = symbols.address(label)
+        return read_byte(address) if address is not None else None
+
+    def u16_at(label: str) -> int | None:
+        address = symbols.address(label)
+        return _read_u16_be(read_byte, address) if address is not None else None
+
+    enemy_species = byte_at("wEnemyMonSpecies")
+    out: dict[str, Any] = {
         "kind": "trainer" if battle_type == 2 else "wild",
         "enemy_species": SPECIES_NAMES.get(enemy_species, f"#{enemy_species}") if enemy_species else None,
-        "enemy_level": read_byte(level_addr) if level_addr is not None else None,
-        "enemy_hp": _read_u16_be(read_byte, hp_addr) if hp_addr is not None else None,
+        "enemy_level": byte_at("wEnemyMonLevel"),
+        "enemy_hp": u16_at("wEnemyMonHP"),
+        "enemy_max_hp": u16_at("wEnemyMonMaxHP"),
     }
+    # My active battle mon (wBattleMon mirrors the party mon while fighting).
+    my_species = byte_at("wBattleMon")
+    moves_addr = symbols.address("wBattleMonMoves")
+    pp_addr = symbols.address("wBattleMonPP")
+    if my_species:
+        out["my"] = {
+            "species": SPECIES_NAMES.get(my_species, f"#{my_species}"),
+            "level": byte_at("wBattleMonLevel"),
+            "hp": u16_at("wBattleMonHP"),
+            "max_hp": u16_at("wBattleMonMaxHP"),
+            "moves": (
+                _read_moves(read_byte, moves_addr, pp_addr)
+                if moves_addr is not None and pp_addr is not None
+                else []
+            ),
+        }
+    return out

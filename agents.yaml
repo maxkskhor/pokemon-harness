@@ -1,4 +1,7 @@
 agents:
+  - name: gym_agent
+    module: harness.examples.gym_agent
+    description: Mission agent — milestones, battle macros, memory; aims for the Boulder Badge.
   - name: first_agent
     module: harness.examples.first_agent
     description: Single-button agent — sees a screenshot, replies with one button per turn.

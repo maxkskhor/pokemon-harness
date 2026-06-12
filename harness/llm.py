@@ -33,14 +33,19 @@ class LLMProviderConfig:
 
 # Approximate cost per 1M tokens (input, output) for common OpenRouter models.
 # Used for spend tracking — not billing-accurate, just a safety guard.
+# Prices checked against the OpenRouter models API on 2026-06-12.
 _COST_PER_1M: dict[str, tuple[float, float]] = {
-    "openai/gpt-4o-mini":        (0.15,  0.60),
-    "openai/gpt-4o":             (2.50, 10.00),
-    "openai/gpt-4.1-mini":       (0.40,  1.60),
-    "google/gemini-2.5-flash":   (0.15,  0.60),
-    "google/gemini-flash-1.5":   (0.075, 0.30),
-    "qwen/qwen3.6-flash":        (0.06,  0.20),
-    "anthropic/claude-haiku-4-5": (0.80, 4.00),
+    "openai/gpt-5-nano":             (0.05, 0.40),
+    "openai/gpt-5-mini":             (0.25, 2.00),
+    "openai/gpt-4.1-nano":           (0.10, 0.40),
+    "openai/gpt-4o-mini":            (0.15, 0.60),
+    "qwen/qwen3.5-flash-02-23":      (0.065, 0.26),
+    "qwen/qwen3.6-flash":            (0.188, 1.12),
+    "google/gemini-2.5-flash-lite":  (0.10, 0.40),
+    "google/gemini-2.5-flash":       (0.30, 2.50),
+    "google/gemini-3.1-flash-lite":  (0.25, 1.50),
+    "mistralai/mistral-small-3.2-24b-instruct": (0.075, 0.20),
+    "anthropic/claude-haiku-4.5":    (1.00, 5.00),
 }
 _COST_DEFAULT: tuple[float, float] = (1.00, 3.00)  # conservative fallback
 

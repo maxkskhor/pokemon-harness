@@ -50,6 +50,9 @@ POKEMON_LABEL_CANDIDATES: dict[str, tuple[str, ...]] = {
     "joy_ignore": ("wJoyIgnore",),
     "ignore_input_counter": ("wIgnoreInputCounter",),
     "map_script": ("wCurMapScript",),
+    # wStatusFlags5 bit 6 = the player is under scripted/simulated movement
+    # (cutscenes like Oak walking you to the lab). wJoyIgnore alone misses these.
+    "status_flags5": ("wStatusFlags5",),
 }
 
 

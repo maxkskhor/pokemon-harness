@@ -35,6 +35,7 @@ import {
 } from "./api";
 import { AgentPanel } from "./agents/AgentPanel";
 import { Checkpoints } from "./checkpoints/Checkpoints";
+import { JourneyPanel } from "./journey/JourneyPanel";
 import { ReplayBar } from "./checkpoints/ReplayBar";
 import { RunPicker } from "./run-picker/RunPicker";
 import { StatusPanel } from "./status/StatusPanel";
@@ -511,6 +512,8 @@ export function App() {
         </header>
 
         {error ? <pre className="error">{error}</pre> : null}
+
+        <JourneyPanel events={events} />
 
         <div className="screen-wrap">
           {screenSrc ? (
