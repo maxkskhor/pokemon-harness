@@ -1,9 +1,11 @@
-import { Activity, History, Pause, Play, RefreshCw, RotateCcw, Square } from "lucide-react";
+import { Pause, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   API_BASE,
+  AgentDefinition,
   HarnessAgent,
   PokemonState,
+  RomInfo,
   RunSummary,
   SavedState,
   TraceEvent,
@@ -11,7 +13,10 @@ import {
   frameThumbnailUrl,
   getHealth,
   getState,
+  launchAgent,
+  listAgents,
   listHarnesses,
+  listRoms,
   listRunFrames,
   listRunStates,
   listRuns,
@@ -24,12 +29,15 @@ import {
   screenshotUrl,
   setSpeed,
   stopHarness,
+  terminateAgent,
   traceUrl,
   wsUrl,
 } from "./api";
+import { AgentPanel } from "./agents/AgentPanel";
 import { Checkpoints } from "./checkpoints/Checkpoints";
-import { FrameScrubber } from "./checkpoints/FrameScrubber";
+import { ReplayBar } from "./checkpoints/ReplayBar";
 import { RunPicker } from "./run-picker/RunPicker";
+import { StatusPanel } from "./status/StatusPanel";
 import { TraceFilters } from "./trace/TraceFilters";
 import { TraceList } from "./trace/TraceList";
 import { NOISY_EVENT_TYPES, type FilterType } from "./trace/helpers";
@@ -44,6 +52,9 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
   const [harnessAgents, setHarnessAgents] = useState<HarnessAgent[]>([]);
+  const [agentDefs, setAgentDefs] = useState<AgentDefinition[]>([]);
+  const [roms, setRoms] = useState<RomInfo[]>([]);
+  const [selectedRom, setSelectedRom] = useState<string | null>(null);
   const [selectedHarnessId, setSelectedHarnessId] = useState<string | null>(null);
   const [runStates, setRunStates] = useState<SavedState[]>([]);
   const [sharedStates, setSharedStates] = useState<SavedState[]>([]);
@@ -51,7 +62,6 @@ export function App() {
   const [runHistory, setRunHistory] = useState<RunSummary[]>([]);
   const [viewedRunId, setViewedRunId] = useState<string | null>(null);
   const [frameNumbers, setFrameNumbers] = useState<number[]>([]);
-  const [scrubSelectedFrame, setScrubSelectedFrame] = useState<number | null>(null);
   const [scrubPreviewFrame, setScrubPreviewFrame] = useState<number | null>(null);
   const viewedRunIdRef = useRef<string | null>(null);
   viewedRunIdRef.current = viewedRunId;
@@ -79,9 +89,9 @@ export function App() {
   const isViewingPastRun = viewedRunId !== null;
 
   // Primary action label is driven solely by the View Run picker:
-  //   "start"  – dropdown selection only; click starts fresh from `bedroom`.
+  //   "start"  – agent selection only; click starts fresh from `bedroom`.
   //   "resume" – user explicitly picked a past run; click branches from that run's checkpoint.
-  // Changing the agent in the dropdown must never silently imply resume.
+  // Changing the agent must never silently imply resume.
   const primaryIntent: "start" | "resume" = isViewingPastRun ? "resume" : "start";
 
   const viewedRunHasCheckpoint = runStates.length > 0;
@@ -122,6 +132,12 @@ export function App() {
       .catch(() => {});
     void refreshCheckpoints(null);
     void refreshRunHistory();
+    listRoms()
+      .then((available) => {
+        setRoms(available);
+        setSelectedRom((current) => current ?? available.find((r) => r.default)?.filename ?? available[0]?.filename ?? null);
+      })
+      .catch(() => setRoms([]));
   }, []);
 
   // WebSocket for live events
@@ -172,7 +188,9 @@ export function App() {
           if (event.type === "run_started") {
             void refreshRunHistory();
           }
-          if (event.frame != null) {
+          // Only traced events persist a frame thumbnail — playback_frame ticks
+          // don't, so adding them would put broken images on the replay timeline.
+          if (event.frame != null && !NOISY_EVENT_TYPES.has(event.type)) {
             setFrameNumbers((current) => {
               const frame = event.frame as number;
               if (current.includes(frame)) return current;
@@ -207,7 +225,7 @@ export function App() {
   }, []);
 
   // On the first time we discover an active run (e.g. on page reload), align the
-  // dropdown with the harness that started that run. Subsequent runs are
+  // selection with the harness that started that run. Subsequent runs are
   // user-initiated, so we leave the selection alone after this fires once.
   useEffect(() => {
     if (autoSelectAttemptedRef.current) return;
@@ -223,18 +241,20 @@ export function App() {
     }
   }, [state, harnessAgents, runHistory, selectedHarnessId]);
 
-  // Poll harness registry
+  // Poll harness registry + agent process list
   useEffect(() => {
     const poll = async () => {
       try {
-        const agents = await listHarnesses();
+        const [agents, defs] = await Promise.all([listHarnesses(), listAgents()]);
         setHarnessAgents(agents);
+        setAgentDefs(defs);
         setSelectedHarnessId((prev) => {
           if (prev && agents.find((a) => a.id === prev)) return prev;
           return agents[0]?.id ?? null;
         });
       } catch {
         setHarnessAgents([]);
+        setAgentDefs([]);
       }
     };
     poll();
@@ -297,17 +317,14 @@ export function App() {
   async function refreshFrames(activeRunId: string | null) {
     if (!activeRunId) {
       setFrameNumbers([]);
-      setScrubSelectedFrame(null);
       setScrubPreviewFrame(null);
       return;
     }
     try {
       const frames = await listRunFrames(activeRunId);
       setFrameNumbers(frames);
-      setScrubSelectedFrame((current) => current ?? frames.at(-1) ?? null);
     } catch {
       setFrameNumbers([]);
-      setScrubSelectedFrame(null);
       setScrubPreviewFrame(null);
     }
   }
@@ -348,6 +365,7 @@ export function App() {
 
   async function handleSelectRun(runId: string | null) {
     setViewedRunId(runId);
+    setScrubPreviewFrame(null);
     if (runId === null) {
       // Back to the active (live) run. Replay the persisted trace; live WS events resume.
       const activeRunId = eventRunIdRef.current ?? state?.run_id ?? null;
@@ -355,6 +373,10 @@ export function App() {
         await refreshTraces(activeRunId);
         await refreshFrames(activeRunId);
         await refreshCheckpoints(activeRunId);
+      } else {
+        setEvents([]);
+        setFrameNumbers([]);
+        await refreshCheckpoints(null);
       }
       return;
     }
@@ -386,12 +408,13 @@ export function App() {
     if (!selectedHarnessId) return;
     // Switch to live view so the user sees the active run, not a stale past run.
     setViewedRunId(null);
+    setScrubPreviewFrame(null);
     const activeRunId = eventRunIdRef.current ?? state?.run_id ?? null;
     if (activeRunId) {
       void refreshTraces(activeRunId);
       void refreshFrames(activeRunId);
     }
-    await runAction(() => playHarness(selectedHarnessId), false);
+    await runAction(() => playHarness(selectedHarnessId, selectedRom), false);
   }
 
   async function handleHarnessStop() {
@@ -432,6 +455,7 @@ export function App() {
       });
       // Flip the UI to live view so it follows the new branched run.
       setViewedRunId(null);
+      setScrubPreviewFrame(null);
       eventRunIdRef.current = result.run_id;
       await refreshTraces(result.run_id);
       await refreshFrames(result.run_id);
@@ -440,6 +464,29 @@ export function App() {
       return result;
     }, true);
   }
+
+  async function handleLaunchAgent(name: string) {
+    await runAction(() => launchAgent(name), false);
+  }
+
+  async function handleTerminateAgent(name: string) {
+    await runAction(() => terminateAgent(name), false);
+  }
+
+  // What the main screen shows: a scrubbed/replayed frame, the viewed past
+  // run's last captured frame, or the live emulator screenshot.
+  const screenRunId = viewedRunId ?? state?.run_id ?? null;
+  let screenSrc: string | null = null;
+  if (scrubPreviewFrame != null && screenRunId) {
+    screenSrc = frameThumbnailUrl(screenRunId, scrubPreviewFrame);
+  } else if (isViewingPastRun && viewedRunId) {
+    const lastFrame = frameNumbers.at(-1);
+    screenSrc = lastFrame != null ? frameThumbnailUrl(viewedRunId, lastFrame) : null;
+  } else if (state) {
+    screenSrc = screenshotUrl(imageVersion);
+  }
+
+  const liveStatus = !isViewingPastRun ? state?.status ?? null : null;
 
   return (
     <main className="app-shell">
@@ -452,30 +499,37 @@ export function App() {
               <span>WebSocket {wsConnected ? "● connected" : "○ disconnected"}</span>
             </span>
           </div>
+          <div className="topbar-context">
+            {isViewingPastRun ? (
+              <span className="screen-mode-badge replaying">viewing {viewedRunId}</span>
+            ) : state ? (
+              <span className="screen-mode-badge live">
+                {state.rom.title ?? state.rom.filename} · {state.run_id}
+              </span>
+            ) : null}
+          </div>
         </header>
 
         {error ? <pre className="error">{error}</pre> : null}
 
         <div className="screen-wrap">
-          {state ? (
-            <img
-              className="game-screen"
-              src={scrubPreviewFrame != null ? frameThumbnailUrl(state.run_id, scrubPreviewFrame) : screenshotUrl(imageVersion)}
-              alt="Pokemon emulator frame"
-            />
+          {screenSrc ? (
+            <img className="game-screen" src={screenSrc} alt="Pokemon emulator frame" />
           ) : (
-            <div className="empty-screen">No active run</div>
+            <div className="empty-screen">
+              {isViewingPastRun ? "No captured frames for this run" : "No active run — launch an agent and press Start"}
+            </div>
           )}
+          {scrubPreviewFrame != null && <span className="screen-overlay">REPLAY</span>}
         </div>
 
-        <FrameScrubber
-          runId={state?.run_id ?? null}
+        <ReplayBar
+          runId={screenRunId}
           frames={frameNumbers}
-          selectedFrame={scrubSelectedFrame}
           previewFrame={scrubPreviewFrame}
           checkpoints={runStates}
           busy={busy}
-          onSelectFrame={setScrubSelectedFrame}
+          canRewind={!isViewingPastRun && state != null}
           onPreviewFrame={setScrubPreviewFrame}
           onRewind={handleLoadCheckpoint}
         />
@@ -488,27 +542,24 @@ export function App() {
                 key={mode}
                 className={state?.speed_mode === mode ? "selected" : ""}
                 onClick={() => runAction(() => setSpeed(mode))}
-                disabled={!state || busy}
+                disabled={!state || busy || isViewingPastRun}
                 title={mode === "paused" ? "Freeze background; agent still acts" : `Run at ${mode}`}
               >
                 {mode === "paused" ? <Pause size={14} /> : null}{mode}
               </button>
             ))}
           </div>
+          <div className="metric-strip">
+            <Metric label="Frame" value={state?.frame ?? "-"} />
+            <Metric label="Spend" value={runCostDisplay(events)} />
+          </div>
         </section>
 
-        <section className="state-grid">
-          <Metric label="Run" value={state?.run_id ?? "-"} />
-          <Metric label="Frame" value={state?.frame ?? "-"} />
-          <Metric label="Speed" value={state?.speed_mode ?? "-"} />
-          <Metric label="Map" value={state?.pokemon.map_id ?? "-"} />
-          <Metric label="X/Y" value={state ? `${state.pokemon.x ?? "-"} / ${state.pokemon.y ?? "-"}` : "-"} />
-          <Metric label="Party" value={state?.pokemon.party_count ?? "-"} />
-          <Metric label="Spend" value={runCostDisplay(events)} />
-        </section>
+        <StatusPanel status={liveStatus} />
 
         <Checkpoints
           state={state}
+          viewedRunId={viewedRunId}
           runStates={runStates}
           sharedStates={sharedStates}
           checkpointName={checkpointName}
@@ -522,6 +573,30 @@ export function App() {
 
       <aside className="trace-pane">
         <header className="harness-header">
+          <AgentPanel
+            agents={agentDefs}
+            harnessAgents={harnessAgents}
+            selectedHarnessId={selectedHarnessId}
+            onSelectHarness={setSelectedHarnessId}
+            roms={roms}
+            selectedRom={selectedRom}
+            onSelectRom={setSelectedRom}
+            primaryIntent={primaryIntent}
+            resumeBlocker={resumeBlocker}
+            busy={busy}
+            onPlay={handleHarnessPlay}
+            onResume={handleHarnessResume}
+            onStop={handleHarnessStop}
+            onReset={handleHarnessReset}
+            onLaunch={handleLaunchAgent}
+            onTerminate={handleTerminateAgent}
+          />
+          <RunPicker
+            activeRunId={state?.run_id ?? null}
+            viewedRunId={viewedRunId}
+            runHistory={runHistory}
+            onSelectRun={handleSelectRun}
+          />
           <div className="trace-title-row">
             <div>
               <h2>Trace</h2>
@@ -530,77 +605,11 @@ export function App() {
                 {viewedRunId ? ` · viewing ${viewedRunId}` : ""}
               </span>
             </div>
-            <button onClick={handleReloadTraces} disabled={busy || !eventRunIdRef.current}>
+            <button onClick={handleReloadTraces} disabled={busy || (!eventRunIdRef.current && !viewedRunId)}>
               <RefreshCw size={14} /> Reload
             </button>
           </div>
-          <RunPicker
-            activeRunId={state?.run_id ?? null}
-            viewedRunId={viewedRunId}
-            runHistory={runHistory}
-            onSelectRun={handleSelectRun}
-          />
-          <div className="agent-controls" aria-label="Agent controls">
-            <span>Agent</span>
-            <div className="harness-controls">
-              <select
-                value={selectedHarnessId ?? ""}
-                onChange={(e) => setSelectedHarnessId(e.target.value || null)}
-                disabled={harnessAgents.length === 0}
-              >
-                {harnessAgents.length === 0
-                  ? <option value="">No harness connected</option>
-                  : harnessAgents.map((h) => (
-                      <option key={h.id} value={h.id}>{h.name} · {h.status}</option>
-                    ))}
-              </select>
-              {primaryIntent === "resume" ? (
-                <button
-                  onClick={handleHarnessResume}
-                  disabled={
-                    busy
-                    || resumeBlocker !== null
-                    || !selectedHarness
-                    || selectedHarness.status === "running"
-                    || selectedHarness.status === "disconnected"
-                  }
-                  title={resumeBlocker ?? "Resume this run from its latest checkpoint"}
-                >
-                  <History size={14} /> Resume agent
-                </button>
-              ) : (
-                <button
-                  onClick={handleHarnessPlay}
-                  disabled={busy || !selectedHarness || selectedHarness.status === "running" || selectedHarness.status === "disconnected"}
-                  title="Start a fresh run from the bedroom save state"
-                >
-                  <Play size={14} /> Start agent
-                </button>
-              )}
-              <button
-                onClick={handleHarnessStop}
-                disabled={busy || !selectedHarness || selectedHarness.status === "idle"}
-              >
-                <Square size={14} /> Stop agent
-              </button>
-              <button
-                onClick={handleHarnessReset}
-                disabled={busy || !selectedHarness || selectedHarness.status === "disconnected"}
-                title="Stop agent and reset to bedroom save state"
-              >
-                <RotateCcw size={14} /> Reset
-              </button>
-            </div>
-          </div>
           <TraceFilters filters={traceFilters} onChange={setTraceFilters} showImages={showImages} onToggleImages={setShowImages} />
-          {selectedHarness && (
-            <span className="harness-status" data-status={selectedHarness.status}>
-              <Activity size={13} /> {selectedHarness.status}
-            </span>
-          )}
-          {selectedHarness?.error && (
-            <pre className="harness-error">{selectedHarness.error}</pre>
-          )}
         </header>
 
         <div className="harness-events">

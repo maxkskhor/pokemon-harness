@@ -17,6 +17,9 @@ Proper teardown:
 ```bash
 pkill -f "uvicorn|vite|tool_agent|first_agent|dev.sh" 2>/dev/null || true
 sleep 2
+# uvicorn can hang in graceful shutdown forever waiting on open WebSockets, and a
+# half-dead backend keeps overwriting runs/registry.json with stale records.
+pkill -9 -f "uvicorn|vite" 2>/dev/null || true
 lsof -ti :8000 -ti :5173 | xargs kill -9 2>/dev/null || true
 ```
 
@@ -106,6 +109,26 @@ After completing any meaningful work, append an entry to `CHANGELOG.md`. Group b
 - East wall is at `x=5` — RIGHT from x=5 is correctly blocked, not a bug.
 - `wCurMap` defaults to 38 in RAM from the very first game frame. Seeing `map_id=38` immediately after boot does **not** mean the bedroom loaded; wait until after the full intro completes.
 - `wIgnoreInputCounter` cycles between 0–255 during normal bedroom free-roam (step animation counter). This is expected — it does not block movement.
+
+## Pokemon Fire Red (GBA) support
+
+- `.gba` ROMs run on `MGBAEmulator` (locally built mGBA Python bindings), everything else on PyBoy. Dispatch happens in `env/emulator.create_emulator` by file suffix.
+- The mGBA bindings live in `third_party/mgba/build/python/lib.<platform>/` — **not** installed into the venv. `env/emulator._ensure_mgba_importable` adds that path to `sys.path` lazily. Build them with `scripts/setup_firered.sh`; it applies `scripts/patches/mgba-ereader-ffmpeg-guard.patch` first (without it, the cffi glue references e-Reader scan symbols that a no-FFmpeg libmgba doesn't define, and the module fails at dlopen).
+- `roms/pokefirered.sym` is generated from the ELF with `arm-none-eabi-nm` (format: `8-hex-address label`). `env/symbols.parse_sym_file` understands both this and the rgbds `BB:AAAA label` format.
+- Fire Red keeps SaveBlock1/2 behind **dynamic pointers** (`gSaveBlock1Ptr`/`gSaveBlock2Ptr`); money is XOR-encrypted with the key at SaveBlock2+0xF20, and party species sit in the personality-keyed encrypted Growth substructure. All handled in `env/gamestate_gen3.py` — offsets were verified against the pret source, don't guess new ones.
+- FRLG map ids are `(map_group << 8) | map_num`. Bedroom = 1025 (group 4, num 1).
+- The scripted FRLG intro (`scripts/setup.py --create-bedroom-state --rom pokefirered.gba`) reliably reaches the bedroom but the naming keyboard may end up with junk names (e.g. `AAAAAAA`) — typed letters depend on text timing. Names are cosmetic. On the FRLG naming keyboard, B deletes one character, but B **on an empty field backs out of the keyboard entirely** — never send more B presses than there can be characters (7).
+- A blind A-mash in the FRLG bedroom can open the bag/menus; back out with B before checking movement.
+
+## Shared start states are ROM-scoped
+
+`load_state("bedroom")` resolves run-local first, then `states/shared/bedroom-<rom_stem>.state`, then `states/shared/bedroom.state`. So one logical name ("bedroom") maps to the right game: `bedroom.state` (pokered), `bedroom-pokeblue.state`, `bedroom-pokefirered.state`.
+
+## Agent launcher
+
+- Agents are launched from the UI (Agents panel) via `POST /api/agents/{name}/launch`; `scripts/dev.sh` no longer pre-spawns them. The backend spawns `python -m <module>` with `POKEMON_AGENT_KEY=<agents.yaml name>`, which the agent echoes back as registration metadata so the UI can match process ↔ harness record.
+- `POKEMON_AGENT_MODEL` overrides the example agents' model.
+- The UI's Play sends an optional ROM; it's stored as `pending_rom` on the harness registry record and consumed by the next `/api/run/start` carrying that `harness_id`.
 
 ## LLM agent prompting
 

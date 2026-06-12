@@ -11,7 +11,9 @@ from typing import Any, Callable
 from fastapi import HTTPException, WebSocket
 from starlette.websockets import WebSocketDisconnect
 
-from env.emulator import Emulator, PyBoyEmulator, file_sha1, png_sha256, rom_title
+from env.emulator import Emulator, create_emulator, file_sha1, png_sha256, rom_title
+from env.gamestate import read_game_status
+from env.gamestate_gen3 import read_game_status_gen3
 from env.models import (
     HarnessEventRequest,
     PressAction,
@@ -21,7 +23,7 @@ from env.models import (
     StartRunRequest,
     StepRequest,
 )
-from env.paths import RUNS_DIR, STATES_DIR, default_rom_path, default_symbol_path
+from env.paths import ROMS_DIR, RUNS_DIR, STATES_DIR, default_rom_path, default_symbol_path
 from env.symbols import SymbolMap, parse_sym_file, read_pokemon_labels
 from env.trace import TraceStore, ensure_safe_name, now_iso
 
@@ -189,8 +191,30 @@ class Session:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(png)
 
+    @property
+    def is_gba(self) -> bool:
+        return self.rom_path.suffix.lower() == ".gba"
+
     def state_payload(self) -> dict[str, Any]:
-        pokemon = read_pokemon_labels(self.symbols, self.emulator.read_memory_byte)
+        try:
+            status = (
+                read_game_status_gen3(self.symbols, self.emulator.read_memory_byte)
+                if self.is_gba
+                else read_game_status(self.symbols, self.emulator.read_memory_byte)
+            )
+        except Exception:
+            logger.exception("game status read failed run_id=%s", self.run_id)
+            status = None
+        if self.is_gba:
+            position = (status or {}).get("position") or {}
+            pokemon = {
+                "map_id": (status or {}).get("map_id"),
+                "x": position.get("x"),
+                "y": position.get("y"),
+                "party_count": len((status or {}).get("party") or []),
+            }
+        else:
+            pokemon = read_pokemon_labels(self.symbols, self.emulator.read_memory_byte)
         return {
             "run_id": self.run_id,
             "running": self.running,
@@ -199,11 +223,12 @@ class Session:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "rom": self.rom_metadata,
             "screen": {
-                "width": 160,
-                "height": 144,
+                "width": 240 if self.is_gba else 160,
+                "height": 160 if self.is_gba else 144,
                 "sha256": self.screen_sha256(),
             },
             "pokemon": pokemon,
+            "status": status,
         }
 
     def position_snapshot(self) -> dict[str, Any]:
@@ -212,6 +237,18 @@ class Session:
         Doesn't render a screenshot (unlike state_payload), so it's safe to call before
         a press completes.
         """
+        if self.is_gba:
+            try:
+                status = read_game_status_gen3(self.symbols, self.emulator.read_memory_byte)
+            except Exception:
+                status = {}
+            position = status.get("position") or {}
+            return {
+                "frame": self.emulator.frame,
+                "map_id": status.get("map_id"),
+                "x": position.get("x"),
+                "y": position.get("y"),
+            }
         pokemon = read_pokemon_labels(self.symbols, self.emulator.read_memory_byte)
         return {
             "frame": self.emulator.frame,
@@ -248,7 +285,7 @@ class RuntimeManager:
         *,
         trace_store: TraceStore | None = None,
         states_dir: Path = STATES_DIR,
-        emulator_factory: EmulatorFactory = PyBoyEmulator,
+        emulator_factory: EmulatorFactory = create_emulator,
     ) -> None:
         self.trace_store = trace_store or TraceStore(RUNS_DIR)
         self.states_dir = states_dir
@@ -365,7 +402,7 @@ class RuntimeManager:
 
         rom_meta = source_meta.get("rom") or {}
         rom_filename = rom_meta.get("filename") if isinstance(rom_meta, dict) else None
-        rom_path = (default_rom_path() if not rom_filename else Path(rom_filename))
+        rom_path = (default_rom_path() if not rom_filename else ROMS_DIR / rom_filename)
         if rom_path is None or not rom_path.exists():
             rom_path = default_rom_path()
         if rom_path is None or not rom_path.exists():
@@ -537,10 +574,16 @@ class RuntimeManager:
         path = self._state_path(session.run_id, request.name)
         sidecar = self._agent_state_path(session.run_id, request.name)
         if not path.exists():
-            shared_path = self._shared_state_path(request.name)
-            if shared_path.exists():
-                path = shared_path
-                sidecar = self._shared_agent_state_path(request.name)
+            # Shared fallback is ROM-aware: "bedroom" with pokeblue.gbc loaded
+            # resolves to shared/bedroom-pokeblue.state when it exists, so each
+            # game keeps its own canonical starting point under one name.
+            rom_scoped = f"{request.name}-{session.rom_path.stem}"
+            for shared_name in (rom_scoped, request.name):
+                shared_path = self._shared_state_path(shared_name)
+                if shared_path.exists():
+                    path = shared_path
+                    sidecar = self._shared_agent_state_path(shared_name)
+                    break
             else:
                 raise HTTPException(status_code=404, detail=f"Save state not found: {request.name}")
         agent_state: dict[str, Any] | None = None

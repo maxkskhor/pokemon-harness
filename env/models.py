@@ -85,6 +85,17 @@ class HarnessRegisterRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+class AgentLaunchRequest(BaseModel):
+    # Optional model override exported as POKEMON_AGENT_MODEL to the agent process.
+    model: str | None = Field(default=None, max_length=120)
+
+
+class HarnessPlayRequest(BaseModel):
+    # ROM filename from roms/ to use for the run started by this Play.
+    # None keeps the default ROM resolution order.
+    rom: str | None = Field(default=None, max_length=120)
+
+
 class HarnessStatusRequest(BaseModel):
     status: Literal["idle", "starting", "running", "stopping", "error", "disconnected"] = Field(min_length=1, max_length=20)
 

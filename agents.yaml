@@ -1,5 +1,7 @@
 agents:
   - name: first_agent
     module: harness.examples.first_agent
+    description: Single-button agent — sees a screenshot, replies with one button per turn.
   - name: tool_agent
     module: harness.examples.tool_agent
+    description: Tool-calling agent — uses move/press/get_state function calls with position feedback.

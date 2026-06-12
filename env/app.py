@@ -11,11 +11,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from starlette.websockets import WebSocketDisconnect
 
+from env.agent_manager import AgentProcessManager
 from env.emulator import Emulator
 from env.harness_registry import HarnessRegistry
+from env.emulator import file_sha1, rom_title
 from env.models import (
+    AgentLaunchRequest,
     HarnessErrorRequest,
     HarnessEventRequest,
+    HarnessPlayRequest,
     HarnessRegisterRequest,
     HarnessResumeRequest,
     HarnessStatusRequest,
@@ -26,6 +30,7 @@ from env.models import (
     StartRunRequest,
     StepRequest,
 )
+from env.paths import ROMS_DIR, default_rom_path, list_rom_files
 from env.runtime import RuntimeManager
 from env.trace import TraceStore
 
@@ -47,6 +52,7 @@ def create_app(
         manager_kwargs["states_dir"] = states_dir
     manager = RuntimeManager(**manager_kwargs)
     harness_registry = HarnessRegistry(storage_path=manager.trace_store.runs_dir / "registry.json")
+    agent_manager = AgentProcessManager()
 
     async def prune_harness_registry() -> None:
         while True:
@@ -65,6 +71,7 @@ def create_app(
                 await task
             except asyncio.CancelledError:
                 pass
+            agent_manager.shutdown()
 
     api = FastAPI(title="Pokemon Harness Environment", version="0.1.0", lifespan=lifespan)
     api.state.manager = manager
@@ -83,6 +90,20 @@ def create_app(
     async def health() -> dict[str, object]:
         return {"ok": True, "active_run": manager.session.run_id if manager.session else None}
 
+    @api.get("/api/roms")
+    async def list_roms() -> list[dict[str, Any]]:
+        default = default_rom_path()
+        out: list[dict[str, Any]] = []
+        for path in list_rom_files():
+            out.append({
+                "filename": path.name,
+                "title": rom_title(path),
+                "sha1": file_sha1(path),
+                "kind": "gba" if path.suffix.lower() == ".gba" else "gb",
+                "default": default is not None and path.name == default.name,
+            })
+        return out
+
     @api.post("/api/run/start")
     async def start_run(request: StartRunRequest = StartRunRequest()) -> dict[str, object]:
         agent_info: dict[str, Any] | None = None
@@ -96,6 +117,12 @@ def create_app(
                     "model": record.get("model"),
                     "metadata": record.get("metadata") or {},
                 }
+                # The UI's Play request may have pinned a ROM for this harness.
+                pending_rom = record.get("pending_rom")
+                if request.rom_path is None and pending_rom:
+                    candidate = ROMS_DIR / pending_rom
+                    if candidate.exists():
+                        request.rom_path = str(candidate)
         return await manager.start_run(request, agent_info=agent_info)
 
     @api.post("/api/run/stop")
@@ -175,9 +202,17 @@ def create_app(
         return await manager.harness_event(request)
 
     @api.post("/api/harness/{harness_id}/play")
-    async def harness_play(harness_id: str) -> dict[str, Any]:
+    async def harness_play(
+        harness_id: str, request: HarnessPlayRequest = HarnessPlayRequest()
+    ) -> dict[str, Any]:
+        if request.rom is not None:
+            rom_path = ROMS_DIR / request.rom
+            if rom_path.parent != ROMS_DIR or not rom_path.exists():
+                raise HTTPException(status_code=404, detail=f"ROM not found: {request.rom}")
         try:
-            harness_registry.update(harness_id, status="running", error=None)
+            harness_registry.update(
+                harness_id, status="running", error=None, pending_rom=request.rom
+            )
             harness_registry.enqueue(harness_id, "play")
         except KeyError:
             raise HTTPException(status_code=404, detail="Harness not found")
@@ -283,6 +318,36 @@ def create_app(
     async def harness_unregister(harness_id: str) -> dict[str, Any]:
         harness_registry.unregister(harness_id)
         return {"ok": True}
+
+    @api.get("/api/agents")
+    async def list_agents() -> list[dict[str, Any]]:
+        """agents.yaml definitions merged with live harness registrations."""
+        # Newest-first so a freshly relaunched agent wins over a stale record
+        # left behind by a killed process.
+        harnesses = sorted(
+            harness_registry.list(),
+            key=lambda h: h.get("last_seen_at") or "",
+            reverse=True,
+        )
+        out = []
+        for entry in agent_manager.list():
+            match = next(
+                (h for h in harnesses if (h.get("metadata") or {}).get("agent_key") == entry["name"]),
+                None,
+            )
+            out.append({**entry, "harness": match})
+        return out
+
+    @api.post("/api/agents/{name}/launch")
+    async def launch_agent(name: str, request: AgentLaunchRequest = AgentLaunchRequest()) -> dict[str, Any]:
+        try:
+            return agent_manager.launch(name, model=request.model)
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"No agent named '{name}' in agents.yaml")
+
+    @api.post("/api/agents/{name}/terminate")
+    async def terminate_agent(name: str) -> dict[str, Any]:
+        return {"terminated": agent_manager.terminate(name)}
 
     @api.get("/api/runs")
     async def list_runs() -> list[dict[str, Any]]:

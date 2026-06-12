@@ -143,6 +143,7 @@ select {
 
 /* Screen grows to fill remaining space */
 .screen-wrap {
+  position: relative;
   flex: 1 1 0;
   min-height: 0;
   display: flex;
@@ -159,7 +160,7 @@ select {
   display: block;
   width: 100%;
   height: 100%;
-  aspect-ratio: 160 / 144;
+  /* No fixed aspect-ratio: GB is 160x144, GBA is 240x160 — contain handles both. */
   object-fit: contain;
   image-rendering: pixelated;
   background: #0b0e0f;
@@ -176,10 +177,9 @@ select {
   font-size: 13px;
 }
 
-.frame-scrubber {
+.replay-bar {
   flex-shrink: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
   gap: 8px;
   padding: 4px 8px;
@@ -188,37 +188,50 @@ select {
   background: #fbfcf8;
 }
 
-.frame-scrubber-main {
-  display: grid;
-  grid-template-columns: auto minmax(120px, 1fr) 88px;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
+.replay-transport {
+  display: flex;
+  gap: 3px;
+  flex-shrink: 0;
 }
 
-.frame-scrubber span {
-  color: #667165;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+.replay-transport button {
+  min-height: 26px;
+  width: 28px;
+  padding: 0;
 }
 
-.frame-scrubber input[type="range"] {
-  width: 100%;
+.replay-bar input[type="range"] {
+  flex: 1 1 0;
+  min-width: 80px;
   min-height: 22px;
   padding: 0;
 }
 
-.frame-scrubber output {
+.replay-bar output {
   color: #46514b;
   font-size: 11px;
   text-align: right;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.frame-scrubber button {
+.replay-bar button {
   white-space: nowrap;
+  min-height: 26px;
+  font-size: 12px;
+}
+
+.screen-overlay {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(196, 88, 48, 0.9);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
 }
 
 /* Controls row */
@@ -289,7 +302,7 @@ select {
   border: 1px solid #d7ddcf;
   border-radius: 6px;
   background: #fbfcf8;
-  max-height: clamp(72px, 9vh, 96px);
+  max-height: clamp(96px, 14vh, 170px);
   overflow: hidden;
 }
 
@@ -345,10 +358,26 @@ select {
   background: #ffffff;
 }
 
+.checkpoint-thumb {
+  width: 44px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  border: 1px solid #d7ddcf;
+  object-fit: cover;
+  image-rendering: pixelated;
+  background: #151a1c;
+}
+
+.checkpoint-thumb.placeholder {
+  background: #eef1ea;
+}
+
 .checkpoint-meta {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  flex: 1 1 0;
 }
 
 .checkpoint-meta strong {
@@ -401,11 +430,11 @@ select {
   text-transform: uppercase;
 }
 
-/* State metrics grid */
-.state-grid {
-  display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+/* Compact metrics next to the speed controls */
+.metric-strip {
+  display: flex;
   gap: 6px;
+  margin-left: auto;
   flex-shrink: 0;
 }
 
@@ -429,6 +458,315 @@ select {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
+}
+
+/* ── Topbar context badge ─────────────────────────────────────────── */
+
+.topbar-context {
+  flex-shrink: 0;
+}
+
+.screen-mode-badge {
+  display: inline-block;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.screen-mode-badge.live {
+  background: #e3f0e8;
+  color: #286b55;
+  border: 1px solid #b9d6c6;
+}
+
+.screen-mode-badge.replaying {
+  background: #f7ead9;
+  color: #9a5a23;
+  border: 1px solid #e3c9a4;
+}
+
+/* ── Game status panel (trainer + party) ──────────────────────────── */
+
+.status-panel {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid #d7ddcf;
+  border-radius: 6px;
+  background: #fbfcf8;
+}
+
+.trainer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+}
+
+.trainer-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #2c3a32;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.trainer-stat svg {
+  color: #667165;
+  flex-shrink: 0;
+}
+
+.badge-row {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.badge-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #e4e8de;
+  border: 1px solid #c8cfbf;
+}
+
+.badge-dot.earned {
+  background: #d8a430;
+  border-color: #b3851d;
+}
+
+.battle-banner {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  background: #fbeeee;
+  border: 1px solid #e4baba;
+  color: #8e3434;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.party-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 6px;
+}
+
+.party-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 7px;
+  border: 1px solid #d7ddcf;
+  border-radius: 5px;
+  background: #ffffff;
+}
+
+.party-card.fainted {
+  opacity: 0.6;
+}
+
+.party-card-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.party-card-top strong {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.party-level {
+  font-size: 10px;
+  color: #667165;
+  flex-shrink: 0;
+}
+
+.party-species {
+  font-size: 10px;
+  color: #8a9a87;
+  margin-top: -2px;
+}
+
+.hp-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #e8ece2;
+  overflow: hidden;
+}
+
+.hp-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.hp-fill.hp-ok { background: #3f9e6a; }
+.hp-fill.hp-warn { background: #d8a430; }
+.hp-fill.hp-danger { background: #c4583a; }
+
+.party-card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #46514b;
+}
+
+.status-chip {
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #ffffff;
+  background: #8a9a87;
+}
+
+.status-chip.status-psn { background: #8a4f9e; }
+.status-chip.status-brn { background: #c4583a; }
+.status-chip.status-par { background: #b39323; }
+.status-chip.status-slp { background: #6c7a8e; }
+.status-chip.status-frz { background: #4f8ab3; }
+.status-chip.status-fnt { background: #6b3232; }
+
+.party-empty {
+  margin: 0;
+  color: #8a9a87;
+  font-size: 11px;
+}
+
+/* ── Agent panel (launcher + run controls) ────────────────────────── */
+
+.agent-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.agent-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.agent-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 9px;
+  border: 1px solid #d7ddcf;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.agent-row.selectable {
+  cursor: pointer;
+}
+
+.agent-row.selectable:hover {
+  border-color: #8fae9f;
+}
+
+.agent-row.selected {
+  border-color: #286b55;
+  box-shadow: 0 0 0 1px #286b55 inset;
+  background: #f2f8f4;
+}
+
+.agent-status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #c4cbbd;
+}
+
+.agent-status-dot.status-idle { background: #8fae9f; }
+.agent-status-dot.status-running { background: #2f9e63; box-shadow: 0 0 0 3px rgba(47, 158, 99, 0.2); }
+.agent-status-dot.status-starting,
+.agent-status-dot.status-stopping { background: #d8a430; }
+.agent-status-dot.status-error { background: #c4583a; }
+.agent-status-dot.status-disconnected,
+.agent-status-dot.status-offline { background: #c4cbbd; }
+
+.agent-row-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.agent-row-main strong {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-row-sub {
+  font-size: 11px;
+  color: #667165;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-row-status {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #667165;
+}
+
+.agent-row-action {
+  min-height: 26px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.agent-rows-empty {
+  margin: 0;
+  color: #8a9a87;
+  font-size: 12px;
+}
+
+.agent-run-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.agent-run-controls select {
+  flex: 1 1 140px;
+  min-width: 120px;
+}
+
+.agent-run-controls button.primary {
+  background: #286b55;
+  border-color: #286b55;
+  color: #ffffff;
+}
+
+.agent-run-controls button.primary:hover:not(:disabled) {
+  background: #1f5643;
+  border-color: #1f5643;
 }
 
 /* ── Right: trace pane ────────────────────────────────────────────── */

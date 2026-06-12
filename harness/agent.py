@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import signal
 import threading
 import time
 import traceback
@@ -240,11 +242,23 @@ class PokemonAgent:
         Press Ctrl-C to exit cleanly.
         """
         print(f"Connecting to {self._base_url} ...")
+        # The UI's agent launcher stops processes with SIGTERM. Convert it to a
+        # normal exit so the finally-block below unregisters from the backend
+        # instead of leaving a stale registry record.
+        try:
+            signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        except ValueError:
+            pass  # not on the main thread (e.g. tests)
         self._client.wait_for_server()
 
         register_payload: dict[str, Any] = {"name": self.name}
         if self.model is not None:
             register_payload["model"] = self.model
+        # Set by the backend's AgentProcessManager when it spawns this process,
+        # so the UI can match this registration back to its agents.yaml entry.
+        agent_key = os.environ.get("POKEMON_AGENT_KEY")
+        if agent_key:
+            register_payload["metadata"] = {"agent_key": agent_key}
         resp = self._client._post("/api/harness/register", register_payload)
         self._harness_id = resp["id"]
         print(f"Registered '{self.name}' (id={self._harness_id})")

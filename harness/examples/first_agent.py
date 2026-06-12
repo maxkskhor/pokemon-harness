@@ -9,6 +9,7 @@ Setup:
 from __future__ import annotations
 
 import base64
+import os
 import threading
 from typing import Any
 
@@ -25,7 +26,7 @@ from harness.llm import (
 
 load_dotenv()
 
-MODEL = PROVIDER_PRESETS["openrouter"].default_model
+MODEL = os.environ.get("POKEMON_AGENT_MODEL") or PROVIDER_PRESETS["openrouter"].default_model
 VALID_BUTTONS = {"A", "B", "UP", "DOWN", "LEFT", "RIGHT", "START", "SELECT"}
 MAX_HISTORY_TURNS = 5
 SPEND_LIMIT_USD = 0.50
@@ -59,6 +60,7 @@ def _strip_image_data(value: Any) -> Any:
 
 class FirstAgent(PokemonAgent):
     name = "First Agent"
+    model = MODEL
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)

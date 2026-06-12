@@ -6,6 +6,8 @@ from pathlib import Path
 
 
 SYMBOL_RE = re.compile(r"^(?P<bank>[0-9A-Fa-f]{2}):(?P<addr>[0-9A-Fa-f]{4})\s+(?P<label>[A-Za-z0-9_.$@]+)$")
+# GBA symbols (from arm-none-eabi-nm): full 32-bit address + label.
+SYMBOL_GBA_RE = re.compile(r"^(?P<addr>[0-9A-Fa-f]{8})\s+(?P<label>[A-Za-z0-9_.$@]+)$")
 
 
 @dataclass(frozen=True)
@@ -26,10 +28,14 @@ def parse_sym_file(path: Path | None) -> SymbolMap:
 
     labels: dict[str, int] = {}
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        match = SYMBOL_RE.match(line.strip())
-        if not match:
+        stripped = line.strip()
+        match = SYMBOL_RE.match(stripped)
+        if match:
+            labels[match.group("label")] = int(match.group("addr"), 16)
             continue
-        labels[match.group("label")] = int(match.group("addr"), 16)
+        gba_match = SYMBOL_GBA_RE.match(stripped)
+        if gba_match:
+            labels[gba_match.group("label")] = int(gba_match.group("addr"), 16)
     return SymbolMap(labels=labels, source=str(path))
 
 

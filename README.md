@@ -1,6 +1,6 @@
 # Pokemon LLM Harness
 
-A local harness for running LLM agents against Pokemon Red/Blue, with live gameplay, structured traces, save states, replay, and turn-by-turn observability.
+A local harness for running LLM agents against Pokemon Red/Blue and Pokemon Fire Red, with live gameplay, structured traces, save states, replay, and turn-by-turn observability.
 
 Use it to watch what an agent saw, what it decided, which button it pressed, and how a run can be inspected or replayed afterwards.
 
@@ -9,10 +9,13 @@ Use it to watch what an agent saw, what it decided, which button it pressed, and
 ## Features
 
 - Live browser UI with gameplay on the left and agent/environment traces on the right.
+- Launch, select, and stop agents directly from the UI; pick which game each run uses.
+- Game status panel: location, money, badges, pokedex, play time, and party cards with HP bars.
 - Turn-based trace cards for observations, decisions, actions, LLM calls, screenshots, and raw payloads.
-- Save states and checkpoints for pausing, rewinding, branching, and replaying runs.
+- Save states and checkpoints (with thumbnails) for pausing, rewinding, and branching runs.
+- Replay timeline: scrub or play back every captured frame of a live or past run.
 - Provider-neutral harness API: write an agent in Python or call the HTTP API from another language.
-- Example LLM agent using an OpenAI-compatible provider.
+- Pokemon Red/Blue on PyBoy, Pokemon Fire Red (GBA) on mGBA — both built locally from the pret decompilation projects.
 
 ## Requirements
 
@@ -48,7 +51,7 @@ This installs Python/UI dependencies, builds local ROM-compatible binaries, star
 scripts/dev.sh
 ```
 
-This starts the backend, UI, and all agents listed in `agents.yaml`. Open `http://localhost:5173`, select an agent from the harness dropdown, and click **Play**.
+This starts the backend and UI. Open `http://localhost:5173`, click **Launch** next to an agent in the Agents panel, pick a game from the dropdown, and click **Start**.
 
 Agent stdout/stderr is written to `logs/<agent>.log`.
 
@@ -58,7 +61,21 @@ To add or remove agents, edit `agents.yaml`:
 agents:
   - name: my_agent
     module: harness.examples.my_agent
+    description: One line shown in the UI.
 ```
+
+## Pokemon Fire Red (optional)
+
+Fire Red is a GBA game, so it runs on mGBA instead of PyBoy. One extra setup step builds everything from upstream source — the ROM from `pret/pokefirered` (byte-matches retail) and the mGBA Python bindings:
+
+```bash
+# macOS build deps
+brew install cmake libpng pkg-config arm-none-eabi-binutils
+
+scripts/setup_firered.sh
+```
+
+Afterwards "POKEMON FIRE" appears in the UI's game dropdown. The script also creates a shared `bedroom-pokefirered` start state (post-intro, in the player's bedroom) so agents skip the long intro, mirroring the Red/Blue `bedroom` state.
 
 ## Build Your Own Agent
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from typing import Any
 
 from dotenv import load_dotenv
@@ -27,7 +28,7 @@ from harness.llm import LLMCallError, LLMClient, provider_from_env
 
 load_dotenv()
 
-MODEL = "qwen/qwen3.6-flash"
+MODEL = os.environ.get("POKEMON_AGENT_MODEL") or "qwen/qwen3.6-flash"
 MAX_TOOL_CALLS_PER_TURN = 8
 MAX_HISTORY_TURNS = 12
 SPEND_LIMIT_USD = 0.50

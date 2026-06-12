@@ -41,7 +41,7 @@ test("pokemon harness UI shows game screen when run is active", async ({ page })
     expect(screenBox.width).toBeGreaterThan(500);
     expect(screenBox.height).toBeGreaterThan(500);
 
-    await expect(page.locator(".state-grid")).toContainText("Frame");
+    await expect(page.locator(".metric-strip")).toContainText("Frame");
     expect(errors).toEqual([]);
   } finally {
     await page.request.post("http://127.0.0.1:8000/api/run/stop").catch(() => {});
@@ -75,21 +75,25 @@ test("trace filter checkboxes toggle correctly including screenshots", async ({ 
   expect(errors).toEqual([]);
 });
 
-test("status grid shows agent fields and omits ROM and Symbols", async ({ page }) => {
+test("metric strip shows Frame and Spend", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("http://127.0.0.1:5173/", { waitUntil: "domcontentloaded" });
 
-  const grid = page.locator(".state-grid");
-  await expect(grid).toBeVisible();
-
-  // Agent-relevant fields must be present
-  for (const label of ["Frame", "Map", "X/Y", "Party", "Speed"]) {
-    await expect(grid.getByText(label, { exact: true })).toBeVisible();
+  const strip = page.locator(".metric-strip");
+  await expect(strip).toBeVisible();
+  for (const label of ["Frame", "Spend"]) {
+    await expect(strip.getByText(label, { exact: true })).toBeVisible();
   }
+});
 
-  // Scaffold-only fields must be absent
-  await expect(grid.getByText("ROM", { exact: true })).not.toBeVisible();
-  await expect(grid.getByText("Symbols", { exact: true })).not.toBeVisible();
+test("agent panel lists agents.yaml definitions with run controls", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("http://127.0.0.1:5173/", { waitUntil: "domcontentloaded" });
+
+  await expect(page.getByLabel("Agents")).toBeVisible();
+  await expect(page.locator(".agent-row").first()).toBeVisible();
+  await expect(page.getByLabel("Game ROM")).toBeVisible();
+  await expect(page.locator(".agent-run-controls button.primary")).toBeVisible();
 });
 
 test("paused speed button tooltip explains it does not stop the agent", async ({ page }) => {

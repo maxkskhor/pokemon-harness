@@ -12,6 +12,36 @@ export interface TraceEvent {
   payload: Record<string, unknown>;
 }
 
+export interface PartyMon {
+  slot: number;
+  species: string;
+  nickname: string;
+  level: number;
+  hp: number;
+  max_hp: number;
+  status: string | null;
+}
+
+export interface BattleInfo {
+  kind: "wild" | "trainer";
+  enemy_species: string | null;
+  enemy_level: number | null;
+  enemy_hp: number | null;
+}
+
+export interface GameStatus {
+  player_name: string | null;
+  money: number | null;
+  map_id: number | null;
+  map_name: string | null;
+  badges: string[];
+  pokedex_owned: number | null;
+  pokedex_seen: number | null;
+  play_time: string | null;
+  party: PartyMon[];
+  battle: BattleInfo | null;
+}
+
 export interface PokemonState {
   run_id: string;
   running: boolean;
@@ -30,6 +60,7 @@ export interface PokemonState {
     sha256: string;
   };
   pokemon: Record<string, number | null>;
+  status: GameStatus | null;
 }
 
 export interface HealthState {
@@ -109,6 +140,8 @@ export function loadState(name: string): Promise<PokemonState> {
 export interface HarnessAgent {
   id: string;
   name: string;
+  model: string | null;
+  metadata: Record<string, unknown> | null;
   status: "idle" | "starting" | "running" | "stopping" | "error" | "disconnected";
   error: string | null;
   created_at: string;
@@ -120,8 +153,48 @@ export function listHarnesses(): Promise<HarnessAgent[]> {
   return request<HarnessAgent[]>("/api/harness/list");
 }
 
-export function playHarness(id: string): Promise<{ ok: boolean }> {
-  return request<{ ok: boolean }>(`/api/harness/${id}/play`, { method: "POST" });
+export function playHarness(id: string, rom?: string | null): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/api/harness/${id}/play`, {
+    method: "POST",
+    body: JSON.stringify({ rom: rom ?? null }),
+  });
+}
+
+export interface RomInfo {
+  filename: string;
+  title: string | null;
+  sha1: string;
+  kind: "gb" | "gba";
+  default: boolean;
+}
+
+export function listRoms(): Promise<RomInfo[]> {
+  return request<RomInfo[]>("/api/roms");
+}
+
+export interface AgentDefinition {
+  name: string;
+  module: string;
+  description: string | null;
+  running: boolean;
+  pid: number | null;
+  log: string;
+  harness: HarnessAgent | null;
+}
+
+export function listAgents(): Promise<AgentDefinition[]> {
+  return request<AgentDefinition[]>("/api/agents");
+}
+
+export function launchAgent(name: string, model?: string | null): Promise<{ name: string; pid: number }> {
+  return request(`/api/agents/${encodeURIComponent(name)}/launch`, {
+    method: "POST",
+    body: JSON.stringify({ model: model ?? null }),
+  });
+}
+
+export function terminateAgent(name: string): Promise<{ terminated: boolean }> {
+  return request(`/api/agents/${encodeURIComponent(name)}/terminate`, { method: "POST" });
 }
 
 export function stopHarness(id: string): Promise<{ ok: boolean }> {

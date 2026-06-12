@@ -1,5 +1,27 @@
 # Changelog
 
+## 2026-06-12 (Pokemon Fire Red, agent launcher, game status panel, replay)
+
+### Added
+- **Pokemon Fire Red (GBA) support.** `scripts/setup_firered.sh` builds the ROM from pret/pokefirered with agbcc (byte-matches retail via `make compare`), extracts RAM symbols from the ELF into `roms/pokefirered.sym`, and builds the mGBA 0.10.5 Python bindings from source into `third_party/mgba/build/python/`. `env/emulator.py` gains `MGBAEmulator` and a `create_emulator` factory that dispatches by ROM suffix (`.gba` → mGBA, else PyBoy). `scripts/patches/mgba-ereader-ffmpeg-guard.patch` guards mGBA's e-Reader scan API behind `USE_FFMPEG` so the cffi bindings link without FFmpeg.
+- `env/gamestate.py` — rich Gen 1 status reader (player name, money, badges, pokedex counts, play time, party with species/nickname/level/HP/status, in-battle enemy info), surfaced as `status` in `/api/state`. Names come from `env/pokered_names.py`, generated from the pret/pokered constants by `scripts/generate_pokered_names.py`.
+- `env/gamestate_gen3.py` — Fire Red status reader: dereferences `gSaveBlock1Ptr`/`gSaveBlock2Ptr`, decrypts the money field and the party Growth substructure (species), decodes Gen 3 text, reads badges from the flags array. Map names from `env/pokefirered_names.py` (`scripts/generate_firered_names.py`).
+- **Agent launcher.** `env/agent_manager.py` + `GET /api/agents`, `POST /api/agents/{name}/launch|terminate` spawn/stop agent processes defined in `agents.yaml` from the UI. Launched agents carry `POKEMON_AGENT_KEY` so registrations map back to definitions, and honor a `POKEMON_AGENT_MODEL` override. `scripts/dev.sh` no longer pre-spawns agents.
+- **ROM selection.** `GET /api/roms` lists `roms/`; the UI's Play request can pin a ROM per run (`pending_rom` on the harness record, consumed by `/api/run/start`). Shared start states are ROM-scoped: `load_state("bedroom")` resolves `states/shared/bedroom-<romstem>.state` first. Created `bedroom-pokeblue` and `bedroom-pokefirered` shared states (`scripts/setup.py --create-bedroom-state --rom <file>` for GB ROMs).
+- **UI redesign** (`ui/src/`): `AgentPanel` (agent rows with live status dots, Launch/shutdown, ROM picker, Start/Resume/Stop/Reset), `StatusPanel` (location, money, pokedex, play time, badge dots, party cards with HP bars and status chips, battle banner), `ReplayBar` (frame timeline with play/step/scrub replay of captured frames, rewind-to-checkpoint), checkpoint thumbnails, past-run screen preview (shows the viewed run's last frame instead of a blank screen).
+- Tests: `tests/test_gamestate.py`, `tests/test_gamestate_gen3.py` (including substructure decryption against offsets verified in the pret source); new Playwright smoke tests for the agent panel and metric strip.
+
+### Fixed
+- `env/runtime.py` — `resume_from_checkpoint` resolved the source run's ROM with a bare `Path(filename)` that never exists, silently falling back to the default ROM; now resolves against `roms/`.
+- `ui/src/App.tsx` — live `playback_frame` events no longer pollute the replay timeline with frames that have no saved thumbnail.
+- `harness/agent.py` — `serve()` converts SIGTERM into a clean exit so launcher-stopped agents unregister instead of leaving stale registry records.
+- `env/emulator.py` — `rom_title` reads the GBA header (0xA0) for `.gba` files instead of the Game Boy header.
+- AGENTS.md teardown now includes `pkill -9` for uvicorn: graceful shutdown can hang forever on open WebSockets, and the half-dead process keeps overwriting `runs/registry.json` with stale records.
+
+### Changed
+- `pyproject.toml` — added `pyyaml`, `cffi`, `cached-property` (runtime deps of the agent manager and mGBA bindings).
+- `env/symbols.py` — `parse_sym_file` also accepts GBA-style `XXXXXXXX label` lines (from `arm-none-eabi-nm`).
+
 ## 2026-05-22 (Tool Agent bedroom loop fixes)
 
 ### Fixed

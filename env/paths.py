@@ -9,6 +9,18 @@ RUNS_DIR = PROJECT_ROOT / "runs"
 STATES_DIR = PROJECT_ROOT / "states"
 
 
+ROM_SUFFIXES = (".gb", ".gbc", ".gba")
+
+
+def list_rom_files() -> list[Path]:
+    if not ROMS_DIR.exists():
+        return []
+    return sorted(
+        path for path in ROMS_DIR.iterdir()
+        if path.is_file() and path.suffix.lower() in ROM_SUFFIXES
+    )
+
+
 def default_rom_path() -> Path | None:
     for name in ("pokered.gbc", "pokeblue.gbc", "BLUEMONS.GB"):
         candidate = ROMS_DIR / name
