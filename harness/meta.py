@@ -40,6 +40,15 @@ def _max_level(status: Status) -> int:
     return max((mon.get("level") or 0 for mon in _party(status)), default=0)
 
 
+def _has_real_pokemon(status: Status) -> bool:
+    """A genuinely owned Pokemon, not a transient party-count flicker.
+
+    The wPartyCount byte briefly reads 1 during acquisition before the mon's
+    species/level are written, so gate on a real (level >= 1) Pokemon.
+    """
+    return any((mon.get("level") or 0) >= 1 for mon in _party(status))
+
+
 @dataclass(frozen=True)
 class Milestone:
     key: str
@@ -75,7 +84,7 @@ MILESTONES: list[Milestone] = [
         "(if a nickname question appears, choose NO). Your rival will then "
         "challenge you — fight with battle_move(1) until it ends; win or lose, the story "
         "continues.",
-        lambda s, done: len(_party(s)) >= 1,
+        lambda s, done: _has_real_pokemon(s),
     ),
     Milestone(
         "route-1",

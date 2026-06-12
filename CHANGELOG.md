@@ -30,6 +30,17 @@
 - Tests: `tests/test_meta.py` (milestone ordering, blackout rollback precedence over
   milestone scanning, bounded rollbacks, escalation, budget, serialize round-trip).
 
+### Fixed (during live runs)
+- `env/symbols.py` + Gym Agent — detect Pokemon Red's scripted-movement lock via
+  `wStatusFlags5` bit 6, not just `wJoyIgnore`. The Oak-walks-you-to-the-lab cutscene
+  only sets the former, so the agent had been fighting a frozen player and saving
+  corrupted mid-cutscene auto-resume checkpoints. With the fix the agent clears the
+  lab and obtains its starter autonomously (turn 19, ~$0.005 with gpt-5-nano).
+- Gym Agent — `goto(x,y)` greedy pathing tool; `move()` re-issues a press after a
+  no-op (Gen 1 often spends the first press just turning to face a direction); learned
+  walls are dropped when a tile reports all four sides blocked (an input-lock artifact,
+  not real geometry).
+
 ## 2026-06-12 (Pokemon Fire Red, agent launcher, game status panel, replay)
 
 ### Added
