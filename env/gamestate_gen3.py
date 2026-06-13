@@ -14,7 +14,11 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from env.pokefirered_names import FIRERED_MAP_NAMES
+from env.pokefirered_names import (
+    FIRERED_MAP_CONNECTIONS,
+    FIRERED_MAP_NAMES,
+    FIRERED_MAP_WARPS,
+)
 from env.pokered_names import DEX_SPECIES_NAMES
 from env.symbols import SymbolMap
 
@@ -101,6 +105,8 @@ def read_game_status_gen3(symbols: SymbolMap, read_byte: ReadByte) -> dict[str, 
         "party": [],
         "battle": None,
         "position": None,
+        "exits": [],
+        "connections": {},
     }
 
     sb1_ptr_addr = symbols.address("gSaveBlock1Ptr")
@@ -123,6 +129,20 @@ def read_game_status_gen3(symbols: SymbolMap, read_byte: ReadByte) -> dict[str, 
         map_id = (map_group << 8) | map_num
         out["map_id"] = map_id
         out["map_name"] = FIRERED_MAP_NAMES.get(map_id, f"Map {map_group}.{map_num}")
+        # Warp tiles (doors/stairs) and outdoor connections, mined from the FRLG maps —
+        # the navigation aid the agent relies on (surfaced as EXITS/CONNECTIONS).
+        out["exits"] = [
+            {
+                "x": x,
+                "y": y,
+                "to": FIRERED_MAP_NAMES.get(dest, f"map {dest}") if dest is not None else "outside",
+            }
+            for x, y, dest in (FIRERED_MAP_WARPS.get(map_id) or [])
+        ]
+        out["connections"] = {
+            direction: FIRERED_MAP_NAMES.get(dest, f"map {dest}")
+            for direction, dest in (FIRERED_MAP_CONNECTIONS.get(map_id) or {}).items()
+        }
         if sb2_ok:
             key = _u32(read_byte, sb2 + 0xF20)
             out["money"] = _u32(read_byte, sb1 + 0x290) ^ key

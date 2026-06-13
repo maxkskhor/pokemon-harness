@@ -153,6 +153,7 @@ def run_model_live(
     start_state: str,
     poll_timeout_s: float,
     stall_turns: int = 0,
+    rom: str | None = None,
 ) -> BenchResult:
     """Spawn a Gym Agent subprocess pinned to `model`, drive one capped run, score it.
 
@@ -178,7 +179,7 @@ def run_model_live(
         harness_id = _await_registration(base_url, before, deadline=time.monotonic() + 60)
         if harness_id is None:
             raise RuntimeError(f"agent for {model} never registered")
-        _api(base_url, "POST", f"/api/harness/{harness_id}/play")
+        _api(base_url, "POST", f"/api/harness/{harness_id}/play", {"rom": rom} if rom else None)
         run_id = _await_run_and_finish(base_url, harness_id, deadline=time.monotonic() + poll_timeout_s)
         # Stop cleanly so the run's auto-resume snapshot + meta.json are flushed.
         try:
@@ -263,6 +264,7 @@ def main() -> None:
                        help="Abort a model early if no new milestone for this many turns (0=off)")
     run_p.add_argument("--budget", type=float, default=0.50)
     run_p.add_argument("--start-state", default="bedroom")
+    run_p.add_argument("--rom", default=None, help="ROM filename in roms/ (e.g. pokefirered.gba); default = backend default")
     run_p.add_argument("--base-url", default="http://127.0.0.1:8000")
     run_p.add_argument("--poll-timeout", type=float, default=1800.0, help="Per-model seconds")
     run_p.add_argument("-o", "--out", type=Path, default=REPO_ROOT / "bench-results.json")
@@ -287,6 +289,7 @@ def main() -> None:
                 start_state=args.start_state,
                 poll_timeout_s=args.poll_timeout,
                 stall_turns=args.stall_turns,
+                rom=args.rom,
             )
         except Exception as exc:
             print(f"  {model} failed: {exc}", file=sys.stderr)

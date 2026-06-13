@@ -3,6 +3,12 @@
 ## 2026-06-13 (Fire Red default + FRLG journey + replay sync)
 
 ### Added
+- **FRLG navigation aids**: `scripts/generate_firered_names.py` now mines warp tiles and
+  outdoor connections from `pret/pokefirered` `data/maps/*/map.json` into
+  `env/pokefirered_names.py` (`FIRERED_MAP_WARPS`, `FIRERED_MAP_CONNECTIONS`), and
+  `env/gamestate_gen3.py` surfaces them as `exits`/`connections` — the same EXITS hint that
+  makes Gen-1 navigation fast (e.g. the FRLG bedroom staircase at (10,2)). `scripts/bench.py`
+  gained `--rom` so a leaderboard can pin a game without relying on the backend default.
 - **Fire Red milestone journey** (`harness/meta.py` `FRLG_MILESTONES`): same keys/labels as
   the Gen-1 list (so the UI journey tracker is unchanged) but with FRLG map-id checks and
   generation-appropriate prompts. `MetaHarness` now holds an instance `milestones` list;
