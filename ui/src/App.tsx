@@ -41,6 +41,7 @@ import { TraceFilters } from "./trace/TraceFilters";
 import { TraceList } from "./trace/TraceList";
 import { NOISY_EVENT_TYPES, type FilterType } from "./trace/helpers";
 import { WatchView } from "./watch/WatchView";
+import { Conversation } from "./watch/Conversation";
 
 type Tab = "watch" | "inspect" | "runs";
 
@@ -568,6 +569,7 @@ export function App() {
           {tab === "watch" && (
             <WatchView
               screenSrc={screenSrc}
+              runId={screenRunId}
               isViewingPastRun={isViewingPastRun}
               status={liveStatus}
               events={events}
@@ -617,7 +619,27 @@ export function App() {
 
           {tab === "runs" && (
             <section className="runs">
-              <div className="runs-stage">
+              <aside className="runs-rail">
+                <RunPicker
+                  activeRunId={state?.run_id ?? null}
+                  viewedRunId={viewedRunId}
+                  runHistory={runHistory}
+                  onSelectRun={handleSelectRun}
+                />
+                <Checkpoints
+                  state={state}
+                  viewedRunId={viewedRunId}
+                  runStates={runStates}
+                  sharedStates={sharedStates}
+                  checkpointName={checkpointName}
+                  onCheckpointNameChange={setCheckpointName}
+                  onSave={handleSaveCheckpoint}
+                  onLoad={handleLoadCheckpoint}
+                  onDelete={handleDeleteCheckpoint}
+                  busy={busy}
+                />
+              </aside>
+              <div className="runs-main">
                 <div className="runs-screen-wrap">
                   {screenSrc ? (
                     <img className="watch-screen" src={screenSrc} alt="Run frame" />
@@ -637,24 +659,16 @@ export function App() {
                   onRewind={handleLoadCheckpoint}
                 />
               </div>
-              <aside className="runs-side">
-                <RunPicker
-                  activeRunId={state?.run_id ?? null}
-                  viewedRunId={viewedRunId}
-                  runHistory={runHistory}
-                  onSelectRun={handleSelectRun}
-                />
-                <Checkpoints
-                  state={state}
-                  viewedRunId={viewedRunId}
-                  runStates={runStates}
-                  sharedStates={sharedStates}
-                  checkpointName={checkpointName}
-                  onCheckpointNameChange={setCheckpointName}
-                  onSave={handleSaveCheckpoint}
-                  onLoad={handleLoadCheckpoint}
-                  onDelete={handleDeleteCheckpoint}
-                  busy={busy}
+              <aside className="runs-convo">
+                <div className="panel-title">
+                  <span>Conversation</span>
+                  {scrubPreviewFrame != null && <span className="panel-sync">synced to frame {scrubPreviewFrame}</span>}
+                </div>
+                <Conversation
+                  events={events}
+                  runId={screenRunId}
+                  upToFrame={scrubPreviewFrame}
+                  emptyHint="Pick a run to see what the agent saw and decided, turn by turn."
                 />
               </aside>
             </section>

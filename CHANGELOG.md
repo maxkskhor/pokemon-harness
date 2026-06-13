@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-06-13 (conversation transcript + bigger screen)
+
+### Added
+- **Conversation transcript** (`ui/src/watch/Conversation.tsx`) — a first-class chat view
+  of the agent↔model exchange per turn: what the agent **sent** the model (the exact
+  screenshot the model saw, labelled, plus the observation text) and what the model
+  **replied** (its reasoning and tool calls, with a short result blurb and a "text" tag
+  when a call was recovered from text). Collapsible system prompt at the top.
+- It's now the primary right-hand pane in **Watch**, and a third pane in **Runs** synced
+  to the scrubbed replay frame (shows what the agent saw/decided at that point).
+
+### Changed
+- The game screen is much larger in both Watch and Runs (was a small fixed box). Watch is
+  now a two-pane layout (screen + game context | conversation); Runs is a three-pane
+  replay workspace (picker/checkpoints | large screen + scrubber | conversation).
+
 ## 2026-06-13 (model-compat: recover text-emitted tool calls)
 
 ### Fixed
