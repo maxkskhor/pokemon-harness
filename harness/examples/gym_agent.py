@@ -769,8 +769,11 @@ class GymAgent(PokemonAgent):
         while not self.should_stop():
             # Headless benchmark stop conditions (scripts/bench.py): a turn cap and
             # "journey complete". The budget stop is handled inside the turn below.
-            if self._max_turns and self._meta.state.turns >= self._max_turns:
-                self.emit("lifecycle", {"status": "max_turns_reached", "turns": self._meta.state.turns})
+            # Use _turn_counter (true count, never reset) — NOT meta.state.turns, which
+            # rollback restores backwards (meta.serialize carries `turns`), so a model
+            # that keeps rolling back would otherwise never hit either cap.
+            if self._max_turns and self._turn_counter >= self._max_turns:
+                self.emit("lifecycle", {"status": "max_turns_reached", "turns": self._turn_counter})
                 return
             if self._meta.current_milestone() is None:
                 self.emit("lifecycle", {"status": "all_milestones_complete"})
@@ -780,11 +783,11 @@ class GymAgent(PokemonAgent):
             reached = len(self._meta.state.reached)
             if reached > self._last_ms_count:
                 self._last_ms_count = reached
-                self._stall_base_turn = self._meta.state.turns
-            elif self._stall_turns and (self._meta.state.turns - self._stall_base_turn) >= self._stall_turns:
+                self._stall_base_turn = self._turn_counter
+            elif self._stall_turns and (self._turn_counter - self._stall_base_turn) >= self._stall_turns:
                 self.emit("lifecycle", {
                     "status": "stalled",
-                    "turns_since_milestone": self._meta.state.turns - self._stall_base_turn,
+                    "turns_since_milestone": self._turn_counter - self._stall_base_turn,
                 })
                 return
             goal_label = (self._meta.current_milestone().label if self._meta.current_milestone() else "explore")
