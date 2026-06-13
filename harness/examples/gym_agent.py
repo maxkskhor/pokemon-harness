@@ -263,6 +263,11 @@ class GymAgent(PokemonAgent):
         self._run_cost = 0.0
         # Optional hard turn cap for benchmarking (scripts/bench.py). 0/unset = no cap.
         self._max_turns = int(os.environ.get("POKEMON_MAX_TURNS", "0")) or None
+        # Optional stall abort: stop the run if no NEW milestone is reached for this many
+        # turns (so a benchmark never waits out a hopelessly stuck agent). 0/unset = off.
+        self._stall_turns = int(os.environ.get("POKEMON_STALL_TURNS", "0")) or None
+        self._last_ms_count = 0
+        self._stall_base_turn = 0
         self._meta = MetaHarness(
             emit=self.emit,
             save_checkpoint=self.save_state,
@@ -769,6 +774,18 @@ class GymAgent(PokemonAgent):
                 return
             if self._meta.current_milestone() is None:
                 self.emit("lifecycle", {"status": "all_milestones_complete"})
+                return
+            # Stall abort: reset the clock whenever a new milestone lands; bail if it's
+            # been silent too long (stuck looping past the rollback budget).
+            reached = len(self._meta.state.reached)
+            if reached > self._last_ms_count:
+                self._last_ms_count = reached
+                self._stall_base_turn = self._meta.state.turns
+            elif self._stall_turns and (self._meta.state.turns - self._stall_base_turn) >= self._stall_turns:
+                self.emit("lifecycle", {
+                    "status": "stalled",
+                    "turns_since_milestone": self._meta.state.turns - self._stall_base_turn,
+                })
                 return
             goal_label = (self._meta.current_milestone().label if self._meta.current_milestone() else "explore")
             with self.turn(goal=goal_label):

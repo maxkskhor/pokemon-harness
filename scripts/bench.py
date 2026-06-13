@@ -152,6 +152,7 @@ def run_model_live(
     budget: float,
     start_state: str,
     poll_timeout_s: float,
+    stall_turns: int = 0,
 ) -> BenchResult:
     """Spawn a Gym Agent subprocess pinned to `model`, drive one capped run, score it.
 
@@ -163,6 +164,7 @@ def run_model_live(
         "POKEMON_AGENT_MODEL": model,
         "POKEMON_MAX_TURNS": str(max_turns),
         "POKEMON_BUDGET_USD": str(budget),
+        "POKEMON_STALL_TURNS": str(stall_turns),
     }
     before = {h["id"] for h in _api(base_url, "GET", "/api/harness/list")}
     proc = subprocess.Popen(
@@ -257,6 +259,8 @@ def main() -> None:
     run_p = sub.add_parser("run", help="Run a live head-to-head (backend must be up)")
     run_p.add_argument("--models", required=True, help="Comma-separated model ids")
     run_p.add_argument("--max-turns", type=int, default=120)
+    run_p.add_argument("--stall-turns", type=int, default=0,
+                       help="Abort a model early if no new milestone for this many turns (0=off)")
     run_p.add_argument("--budget", type=float, default=0.50)
     run_p.add_argument("--start-state", default="bedroom")
     run_p.add_argument("--base-url", default="http://127.0.0.1:8000")
@@ -282,6 +286,7 @@ def main() -> None:
                 budget=args.budget,
                 start_state=args.start_state,
                 poll_timeout_s=args.poll_timeout,
+                stall_turns=args.stall_turns,
             )
         except Exception as exc:
             print(f"  {model} failed: {exc}", file=sys.stderr)
