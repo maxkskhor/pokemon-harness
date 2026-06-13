@@ -312,6 +312,22 @@ def test_press_inherits_turn_id_from_context() -> None:
     _ = turn_id  # used, not leaked
 
 
+def test_take_steering_drains_buffer() -> None:
+    client = FakeClient()
+    harness = PokemonAgent(client_factory=lambda _: client)
+
+    # No steering yet.
+    assert harness.take_steering() == []
+
+    # The control loop buffers `steer:<text>` commands; simulate two arriving.
+    with harness._steering_lock:
+        harness._steering.extend(["go south", "you passed the exit"])
+
+    assert harness.take_steering() == ["go south", "you passed the exit"]
+    # Draining empties the buffer so the same guidance isn't replayed next turn.
+    assert harness.take_steering() == []
+
+
 def test_run_wrapped_emits_full_traceback_on_error(capsys: Any) -> None:
     client = FakeClient()
 

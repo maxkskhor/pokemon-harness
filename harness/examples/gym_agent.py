@@ -59,6 +59,11 @@ direction to cross (goto a tile on that edge, then move once more in that direct
 - When text/dialogue is on screen, advance it with press(["A"]). Choose YES/NO with \
 the cursor (UP/DOWN) then A. B cancels/backs out of menus.
 - KNOWN WALLS lists directions that failed before from nearby tiles — do not retry them.
+- To pick up a pokeball on a table (e.g. your starter in Oak's lab), goto the tile next \
+to it, move INTO it to face it, then call take_starter() — it handles the "Do you want \
+X?" and nickname prompts for you. Do not mash A through that dialogue.
+- If a HUMAN STEER line is present, a person is actively watching: do exactly what it \
+says THIS turn, even if it differs from the GOAL.
 - In battle, use battle_move(slot). Pick the strongest damaging move (Bubble/Water Gun \
 vs Rock; Tackle/Scratch otherwise). Status moves like Tail Whip/Growl are usually a \
 waste. After "X fainted!" keep pressing A through the messages.
@@ -136,6 +141,14 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "take_starter",
+            "description": "In Oak's lab, when standing next to a pokeball and FACING it (goto the tile below/beside it and move into it first): pick it up. Confirms the 'Do you want X?' prompt with YES and declines the nickname prompt automatically, without overshooting into the naming screen. Use this instead of pressing A through the pickup.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_away",
             "description": "In a WILD battle: try to flee. Does not work against trainers.",
             "parameters": {"type": "object", "properties": {}, "required": []},
@@ -183,10 +196,17 @@ class GymAgent(PokemonAgent):
         self._notes: str = ""
         # walls[map_id] = set of "x,y,DIR" strings that failed to move.
         self._walls: dict[int, set[str]] = {}
+        # Structured, checkpointed world map: every map_id the agent has actually
+        # set foot on, with its name, when it was first seen, a visit count, and
+        # the outdoor connections observed from it. Inspectable (emitted as
+        # `world_update` on discovery) and rides along in checkpoints.
+        self._world: dict[int, dict[str, Any]] = {}
         # Rolling (map,x,y) of recent turn-starts for micro-loop detection.
         self._recent_positions: list[tuple[Any, Any, Any]] = []
         self._loop_streak = 0
         self._run_cost = 0.0
+        # Optional hard turn cap for benchmarking (scripts/bench.py). 0/unset = no cap.
+        self._max_turns = int(os.environ.get("POKEMON_MAX_TURNS", "0")) or None
         self._meta = MetaHarness(
             emit=self.emit,
             save_checkpoint=self.save_state,
@@ -202,6 +222,7 @@ class GymAgent(PokemonAgent):
                 "history": list(self._history),
                 "notes": self._notes,
                 "walls": {str(k): sorted(v) for k, v in self._walls.items()},
+                "world": {str(k): v for k, v in self._world.items()},
                 "meta": self._meta.serialize(),
             }
 
@@ -227,6 +248,11 @@ class GymAgent(PokemonAgent):
                             self._purge_boxed_tiles(wall_set, int(x), int(y))
                         except ValueError:
                             continue
+            world = data.get("world")
+            if isinstance(world, dict):
+                self._world = {
+                    int(k): v for k, v in world.items() if isinstance(v, dict)
+                }
             self._meta.restore(data.get("meta") or {})
 
     # ── observation ────────────────────────────────────────────────────
@@ -252,7 +278,7 @@ class GymAgent(PokemonAgent):
         flags5 = pokemon.get("status_flags5")
         return bool(isinstance(flags5, int) and flags5 & 0x40)
 
-    def _observation_text(self, status: dict[str, Any]) -> str:
+    def _observation_text(self, status: dict[str, Any], steer: list[str] | None = None) -> str:
         state = self.state()
         pokemon = state.get("pokemon") or {}
         map_id = status.get("map_id")
@@ -260,6 +286,11 @@ class GymAgent(PokemonAgent):
         lines = [
             f"LOCATION: {status.get('map_name') or f'map {map_id}'} (map {map_id}), position ({x},{y})",
         ]
+        if steer:
+            lines.append(
+                "!! HUMAN STEER (a person is watching — follow this instruction NOW, "
+                "above the GOAL): " + " | ".join(steer)
+            )
         party = status.get("party") or []
         if party:
             for mon in party:
@@ -302,6 +333,9 @@ class GymAgent(PokemonAgent):
             lines.append(
                 "CONNECTIONS: " + ", ".join(f"{d} -> {name}" for d, name in conns.items())
             )
+        if self._world:
+            visited = ", ".join(sorted({e.get("name", "?") for e in self._world.values()}))
+            lines.append(f"VISITED MAPS (already explored — don't backtrack needlessly): {visited}")
         walls = self._nearby_walls(map_id, x, y)
         if walls:
             lines.append(f"KNOWN WALLS (from failed moves): {'; '.join(walls)}")
@@ -343,6 +377,39 @@ class GymAgent(PokemonAgent):
             except ValueError:
                 continue
         return out[:12]
+
+    def _update_world(self, status: dict[str, Any]) -> None:
+        """Record the current map in the structured world memory.
+
+        First visit to a map emits a `world_update` trace event so the discovery
+        is observable in the UI; subsequent visits just bump the count and fold in
+        any newly observed outdoor connections.
+        """
+        map_id = status.get("map_id")
+        if not isinstance(map_id, int):
+            return
+        entry = self._world.get(map_id)
+        if entry is None:
+            entry = {
+                "name": status.get("map_name") or f"map {map_id}",
+                "first_turn": self._meta.state.turns,
+                "visits": 0,
+                "connections": {},
+            }
+            self._world[map_id] = entry
+            self.emit(
+                "world_update",
+                {
+                    "map_id": map_id,
+                    "name": entry["name"],
+                    "discovered_turn": entry["first_turn"],
+                    "known_maps": len(self._world),
+                },
+            )
+        entry["visits"] += 1
+        conns = status.get("connections") or {}
+        if conns:
+            entry["connections"].update(conns)
 
     # ── tools ──────────────────────────────────────────────────────────
 
@@ -484,6 +551,67 @@ class GymAgent(PokemonAgent):
     def _menu_cursor(self) -> int | None:
         return (self.state().get("pokemon") or {}).get("menu_state")
 
+    def _party_count(self) -> int:
+        """Raw wPartyCount byte (not the level-gated 'real' count).
+
+        This is the signal that increments the *instant* a Pokemon is added to
+        the party, which is exactly what take_starter uses to stop pressing A.
+        """
+        value = (self.state().get("pokemon") or {}).get("party_count")
+        return value if isinstance(value, int) else 0
+
+    def _tool_take_starter(self) -> dict[str, Any]:
+        """Deterministically pick up the pokeball the player is FACING in Oak's lab.
+
+        The flaky part for a cheap model is the two prompts: "Do you want X?" (answer
+        YES) and "Give a nickname?" (answer NO). Pressing A blindly through them either
+        picks NO on the first or opens the naming screen on the second, leaving a
+        phantom level-0 party slot. This macro:
+          1. Pins the cursor on YES and presses A to confirm, stopping the *instant*
+             wPartyCount increments — so it can never press A again into the nickname
+             box (the move that opens the keyboard).
+          2. Drives the nickname YES/NO to NO using the live menu cursor.
+        """
+        if self._status().get("battle"):
+            return {"error": "in battle — finish the fight before picking up a ball"}
+        start_count = self._party_count()
+
+        acquired = False
+        for _ in range(12):
+            if self._party_count() > start_count:
+                acquired = True
+                break
+            self.press("UP")  # pin YES (top option); a no-op on plain text boxes
+            self.sequence([{"type": "wait", "frames": 20}])
+            self.press("A")  # advance dialogue / confirm YES
+            self.sequence([{"type": "wait", "frames": 40}])
+        if not acquired and self._party_count() > start_count:
+            acquired = True
+
+        if acquired:
+            # Advance the "<NAME> received X!" line to surface the nickname YES/NO.
+            self.press("A")
+            self.sequence([{"type": "wait", "frames": 50}])
+            # Decline the nickname: move the cursor to NO (index 1) from its read
+            # state, then confirm. Mirrors battle_move's cursor-driven selection.
+            if self._menu_cursor() == 0:
+                self.press("DOWN")
+                self.sequence([{"type": "wait", "frames": 20}])
+            self.press("A")
+            self.sequence([{"type": "wait", "frames": 60}])
+            self.press("A")  # clear any trailing dialogue line
+            self.sequence([{"type": "wait", "frames": 40}])
+
+        status = self._status()
+        party = status.get("party") or []
+        real = [m for m in party if (m.get("level") or 0) >= 1]
+        return {
+            "acquired": bool(real),
+            "party": [f"{m['nickname']} Lv{m['level']}" for m in real],
+            "phantom_slot": len(party) > len(real),
+            "in_battle": bool(status.get("battle")),
+        }
+
     def _tool_battle_move(self, slot: int) -> dict[str, Any]:
         slot = max(1, min(4, int(slot)))
         status = self._status()
@@ -558,6 +686,8 @@ class GymAgent(PokemonAgent):
             return self._tool_press(list(args.get("buttons") or ["A"]))
         if name == "battle_move":
             return self._tool_battle_move(args.get("slot", 1))
+        if name == "take_starter":
+            return self._tool_take_starter()
         if name == "run_away":
             return self._tool_run_away()
         if name == "note":
@@ -573,6 +703,14 @@ class GymAgent(PokemonAgent):
         self._run_cost = 0.0
 
         while not self.should_stop():
+            # Headless benchmark stop conditions (scripts/bench.py): a turn cap and
+            # "journey complete". The budget stop is handled inside the turn below.
+            if self._max_turns and self._meta.state.turns >= self._max_turns:
+                self.emit("lifecycle", {"status": "max_turns_reached", "turns": self._meta.state.turns})
+                return
+            if self._meta.current_milestone() is None:
+                self.emit("lifecycle", {"status": "all_milestones_complete"})
+                return
             goal_label = (self._meta.current_milestone().label if self._meta.current_milestone() else "explore")
             with self.turn(goal=goal_label):
                 restore_speed: str | None = None
@@ -640,11 +778,20 @@ class GymAgent(PokemonAgent):
 
     def _play_one_turn(self) -> None:
         self._autoplay_cutscene()
+        # Human-in-the-loop: fold any guidance typed in the UI into this turn's
+        # observation and persist it to notes so it carries across a few turns.
+        steer = self.take_steering()
+        if steer:
+            self.emit("steering", {"message": " | ".join(steer)})
+            with self._lock:
+                joined = " ".join(steer)
+                self._notes = ((self._notes + "\n[HUMAN] " + joined).strip())[-MAX_NOTES_CHARS:]
         status = self._status()
-        observation = self._observation_text(status)
+        self._update_world(status)
+        observation = self._observation_text(status, steer=steer)
         if self._circuit_breaker(status):
             # Context was wiped — rebuild the observation with the fresh notes.
-            observation = self._observation_text(status)
+            observation = self._observation_text(status, steer=steer)
         png = self.screenshot_bytes()
         self.emit("observation", {"text": observation})
 

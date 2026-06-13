@@ -80,10 +80,10 @@ MILESTONES: list[Milestone] = [
         "Professor Oak will stop you and bring you to his lab. Advance dialogue with A. "
         "In the lab, the three pokeballs sit ON the table at (6,3), (7,3), (8,3). Choose "
         "SQUIRTLE (strong against the first gym): goto(7,4) — one tile BELOW the middle "
-        "ball — then press([\"UP\",\"A\"]) to face it and inspect, and answer YES with A "
-        "(if a nickname question appears, choose NO). Your rival will then "
-        "challenge you — fight with battle_move(1) until it ends; win or lose, the story "
-        "continues.",
+        "ball — then move UP once to face it, and call take_starter() to pick it up "
+        "(it confirms YES and declines the nickname for you — do NOT mash A). Your rival "
+        "will then challenge you — fight with battle_move(1) until it ends; win or lose, "
+        "the story continues.",
         lambda s, done: _has_real_pokemon(s),
     ),
     Milestone(

@@ -205,6 +205,13 @@ export function resetHarness(id: string): Promise<{ ok: boolean }> {
   return request<{ ok: boolean }>(`/api/harness/${id}/reset`, { method: "POST" });
 }
 
+export function steerHarness(id: string, message: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/api/harness/${id}/steer`, {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
+}
+
 export function resumeHarness(
   id: string,
   body: { source_run_id: string; checkpoint_name?: string },

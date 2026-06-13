@@ -242,6 +242,37 @@ select {
   flex-shrink: 0;
 }
 
+.steer-band {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.steer-band .steer-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 9px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid #2c3a33;
+  background: #141b18;
+  color: #d6e4dc;
+}
+
+.steer-band .steer-input:focus {
+  outline: none;
+  border-color: #34b173;
+}
+
+.steer-band .steer-input::placeholder {
+  color: #5e7068;
+}
+
+.steer-band .steer-input:disabled {
+  opacity: 0.5;
+}
+
 .dpad {
   display: grid;
   grid-template-areas:

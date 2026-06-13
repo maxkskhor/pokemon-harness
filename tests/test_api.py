@@ -117,6 +117,22 @@ def test_load_state_pushes_load_command_to_running_harness(client: TestClient, f
     assert client.get(f"/api/harness/{harness_id}/poll").json() == {"command": "load_state:ckpt"}
 
 
+def test_steer_enqueues_steer_command(client: TestClient) -> None:
+    registered = client.post("/api/harness/register", json={"name": "Steerable"}).json()
+    harness_id = registered["id"]
+
+    resp = client.post(f"/api/harness/{harness_id}/steer", json={"message": "go back\nsouth"})
+    assert resp.status_code == 200
+
+    # Newlines are collapsed so the single-line `steer:<text>` encoding survives.
+    assert client.get(f"/api/harness/{harness_id}/poll").json() == {"command": "steer:go back south"}
+
+
+def test_steer_unknown_harness_404(client: TestClient) -> None:
+    resp = client.post("/api/harness/does-not-exist/steer", json={"message": "hi"})
+    assert resp.status_code == 404
+
+
 def test_save_load_restores_fake_state(client: TestClient, fake_rom: Path, fake_sym: Path) -> None:
     baseline = start_fake_run(client, fake_rom, fake_sym)
 

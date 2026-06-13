@@ -56,6 +56,10 @@ class PokemonAgent:
         # thread can synthesize a `turn_finished` event if Stop tears down the
         # session while the run thread is mid-turn.
         self._active_turn_id: str | None = None
+        # Human-in-the-loop steering messages pushed from the UI (control cmd
+        # `steer:<text>`), buffered on the control thread and drained by run().
+        self._steering_lock = threading.Lock()
+        self._steering: list[str] = []
 
     # ── public API your run() calls ───────────────────────────────────
 
@@ -125,6 +129,19 @@ class PokemonAgent:
     def should_stop(self) -> bool:
         """Return True if the UI sent a Stop signal — check this in your loop."""
         return self._stop_event.is_set()
+
+    def take_steering(self) -> list[str]:
+        """Drain and return any human steering messages sent since the last call.
+
+        Steering is guidance a human typed in the UI during a live run (e.g.
+        "go back south, you passed the exit"). Call this at the top of each turn
+        and fold the messages into the observation you send the model. Returns an
+        empty list when there's nothing pending.
+        """
+        with self._steering_lock:
+            messages = self._steering
+            self._steering = []
+            return messages
 
     @contextmanager
     def turn(
@@ -437,6 +454,14 @@ class PokemonAgent:
                     continue
                 if sidecar:
                     self._apply_agent_state(name, sidecar, source="ws")
+
+            elif cmd.startswith("steer:"):
+                # Human guidance for the live run. Buffer it; run() folds it into
+                # the next turn's observation. Non-blocking so play continues.
+                message = cmd[len("steer:"):].strip()
+                if message:
+                    with self._steering_lock:
+                        self._steering.append(message)
 
             elif cmd.startswith("resume_run:"):
                 # Server has already minted the new run, opened a session, and loaded

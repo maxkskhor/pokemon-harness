@@ -17,7 +17,10 @@ export function eventCategory(event: TraceEvent): FilterType {
     case "rollback":
     case "budget_exceeded":
       return "warning";
+    case "steering":
+      return "decision";
     case "observation":
+    case "world_update":
       return "state";
     case "llm_call":
       return "llm";
@@ -109,6 +112,12 @@ export function summarizeEvent(event: TraceEvent): string {
   }
   if (event.type === "budget_exceeded") {
     return `budget exhausted: $${Number(payload.run_cost_usd ?? 0).toFixed(3)} of $${Number(payload.limit_usd ?? 0).toFixed(2)}`;
+  }
+  if (event.type === "steering") {
+    return `🧑 human steer: ${payload.message ?? ""}`;
+  }
+  if (event.type === "world_update") {
+    return `🗺 discovered ${payload.name ?? `map ${payload.map_id}`} (${payload.known_maps ?? "?"} maps known)`;
   }
   if (event.type === "observation" && typeof payload.text === "string") {
     return payload.text.split("\n")[0];

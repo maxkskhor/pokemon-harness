@@ -147,6 +147,41 @@ After completing any meaningful work, append an entry to `CHANGELOG.md`. Group b
   this static knowledge over adding live tile probing.
 - `gpt-5-nano` defaults to ~14 s/turn of hidden reasoning; the agent passes
   `extra_body={"reasoning": {"effort": "low"}}` to keep turns fast and cheap.
+- `take_starter` keys off the **raw `wPartyCount` byte** (`state()["pokemon"]["party_count"]`),
+  not the level-gated "real party" count, precisely because that byte increments the
+  instant the mon is added — that's the signal it uses to stop pressing A before the
+  nickname YES/NO can open the naming screen. It's unit-tested against a simulated lab
+  dialogue (`tests/test_gym_agent.py`) but not yet confirmed on a live Oak's-lab run.
+- `GymAgent._world` (structured world memory) and the `note()` scratchpad both ride in
+  `serialize_history()`; anything you add there must be added to `restore_history()` too or
+  it silently won't rewind with checkpoints.
+
+## Human-in-the-loop steering
+
+- Steering reuses the control-command FIFO: `POST /api/harness/{id}/steer` enqueues
+  `steer:<message>` (newlines collapsed in the request model so the single-line encoding
+  survives). `PokemonAgent._control_loop` buffers it; `take_steering()` drains it. It is
+  **non-blocking** — it never interrupts the running turn, only feeds the *next* one.
+- The Gym Agent injects pending steering as a `HUMAN STEER` line **above** the GOAL and
+  persists it to notes; it also emits a `steering` trace event. If you add steering to a new
+  agent, call `take_steering()` at the top of the turn — guidance left undrained accumulates.
+
+## Benchmarking (scripts/bench.py)
+
+- `score <run_dirs…>` is pure (reads `harness.jsonl` milestone/`llm_call` events) and needs
+  no backend — use it to score historical runs. `run --models …` spawns Gym Agent
+  subprocesses with `POKEMON_AGENT_MODEL`/`POKEMON_MAX_TURNS`/`POKEMON_BUDGET_USD`, drives
+  Play over HTTP, polls to idle, then scores. The live `run` path has **not** been exercised
+  end-to-end yet (only `score`/leaderboard are tested).
+- The scoring "furthest milestone" and cost come from the meta-harness `milestone` events;
+  if you rename milestones, historical leaderboards re-label automatically (they read the
+  event payloads, not the live `MILESTONES` list).
+
+## Shareable trace export (scripts/generate_trace_html.py)
+
+- Renders one self-contained HTML file per run (frames inlined as base64). `milestone`,
+  `rollback`, and `steering` events are grouped by their `turn_id` and shown as inline
+  banners; if you add a new "story beat" event type, register it in `_BANNER_RENDERERS`.
 
 ## LLM agent prompting
 

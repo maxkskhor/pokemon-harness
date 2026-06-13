@@ -23,6 +23,7 @@ from env.models import (
     HarnessRegisterRequest,
     HarnessResumeRequest,
     HarnessStatusRequest,
+    HarnessSteerRequest,
     PressAction,
     SaveStateRequest,
     SequenceAction,
@@ -310,6 +311,19 @@ def create_app(
     async def harness_error_update(harness_id: str, request: HarnessErrorRequest) -> dict[str, Any]:
         try:
             harness_registry.update(harness_id, error=request.message, status="error")
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Harness not found")
+        return {"ok": True}
+
+    @api.post("/api/harness/{harness_id}/steer")
+    async def harness_steer(harness_id: str, request: HarnessSteerRequest) -> dict[str, Any]:
+        """Push human guidance to a live agent via the control channel.
+
+        Delivered as the `steer:<message>` control command; the agent buffers it
+        and folds it into its next turn's observation (see PokemonAgent.take_steering).
+        """
+        try:
+            harness_registry.enqueue(harness_id, f"steer:{request.message}")
         except KeyError:
             raise HTTPException(status_code=404, detail="Harness not found")
         return {"ok": True}

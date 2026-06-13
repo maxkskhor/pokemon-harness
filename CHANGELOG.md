@@ -1,5 +1,45 @@
 # Changelog
 
+## 2026-06-13
+
+### Added
+- **Benchmark/eval runner** (`scripts/bench.py`): scores a run against the meta-harness
+  milestones (milestones reached, furthest label, turns, cumulative cost) and renders a
+  markdown leaderboard ranked by milestones-then-cost. `score <run_dirs…>` works on any
+  past run with no backend; `run --models a,b,c` spawns capped Gym Agent subprocesses for
+  a live head-to-head and writes `bench-results.json`/`.md`. Tests: `tests/test_bench.py`.
+- **Shareable static trace export** (`scripts/generate_trace_html.py`): now renders
+  `milestone`/`rollback`/`steering` events as inline banners, opens those turns by default,
+  flags them in the turn header, and adds Milestones / Furthest / Rollbacks to the summary
+  strip — turning a run into a self-contained HTML artifact you can link in a writeup.
+- **Human-in-the-loop steering.** `POST /api/harness/{id}/steer` (`HarnessSteerRequest`,
+  newlines collapsed) enqueues a `steer:<message>` control command; `PokemonAgent` buffers
+  it on the control thread and exposes `take_steering()`. The Gym Agent folds pending
+  guidance into the next turn's observation as a prominent `HUMAN STEER` line (above the
+  GOAL), persists it to notes, and emits a `steering` trace event. UI: a steer input in the
+  control band (`api.steerHarness`, enabled while the selected agent is running) plus trace
+  summaries/category for `steering`. Tests: base-class drain, API enqueue + 404, observation
+  injection.
+- **`take_starter` macro** (`harness/examples/gym_agent.py`): deterministic Oak's-lab
+  pickup that pins the cursor on YES and stops pressing A the instant `wPartyCount`
+  increments (so it can't overshoot into the naming screen / leave a phantom level-0 slot),
+  then declines the nickname via the live menu cursor. Registered as a tool; the
+  `get-starter` milestone prompt now points at it. Test simulates the lab dialogue.
+- **Structured world memory** (`GymAgent._world`): every map the agent sets foot on, with
+  name, first-seen turn, visit count, and observed connections. Surfaced as a `VISITED MAPS`
+  observation line, emitted as a `world_update` trace event on first discovery, and
+  round-tripped through checkpoints via `serialize_history`/`restore_history`. UI gets a
+  `world_update` trace summary. Tests: round-trip + emit-once-per-map.
+- Headless run caps for benchmarking: `GymAgent` honors `POKEMON_MAX_TURNS` and stops when
+  the journey is complete.
+
+### Changed
+- `README.md` — rewrote for a first-time reader/portfolio audience: leads with a one-line
+  hook and a "Why it's interesting" section that foregrounds the harness-engineering depth
+  (meta-harness supervision, RAM-mined observations, game-state/LLM-context split,
+  deterministic macros, checkpoint+rollback of agent state, dual-emulator API). Folded the
+  setup steps into a single Quick start block and trimmed the feature list to summaries.
+
 ## 2026-06-12 (Gym Agent + meta-harness: mission "Boulder Badge")
 
 ### Added

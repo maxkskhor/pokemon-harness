@@ -4,20 +4,23 @@ Open work only. Move completed items to `CHANGELOG.md` instead of striking them 
 
 ## Gym Agent / reaching Brock
 
-- The `get-starter` step is the flakiest: a cheap model sometimes opens the Squirtle ball
-  but fumbles the "do you want SQUIRTLE? / nickname?" confirmation, leaving a phantom
-  level-0 party slot. Consider a deterministic "confirm pokeball pickup" macro (like
-  `battle_move`) that drives the YES/NO prompts from menu-cursor reads.
+- The `get-starter` step now has a deterministic `take_starter` pickup macro
+  (`harness/examples/gym_agent.py`), but it has only been verified against a simulated
+  lab dialogue in tests — confirm the YES/nickname-NO choreography on a live Oak's-lab
+  run and tune the frame waits if the prompts land differently.
 - Tune the meta-harness curriculum prompts per phase with screenshots once a stronger
   default model is wired in; gpt-5-nano needs very explicit tile coordinates.
 - Add a per-milestone "skip from shared checkpoint" path so a run can resume past a
   known-hard scripted section (a `post-starter` shared state already exists).
 
-## Advanced Features
+## Benchmark
 
-- Add human-in-the-loop steering so a human can guide or override an agent during a live run without losing trace continuity.
+- `scripts/bench.py run` (live head-to-head) has not been exercised end-to-end against a
+  running backend yet — only the `score`/leaderboard path is covered by tests. Do a real
+  multi-model run and capture a `bench-results.md` for the blog/CV writeup.
 
 ## Harness
 
-- Add agent memory layers beyond the notes scratchpad (e.g. a structured world map)
-  that can be inspected, checkpointed, and restored alongside emulator state.
+- The structured world map (`GymAgent._world`) records visited maps + connections; extend
+  it toward a richer inspectable world model (items seen, NPC hints, per-tile collision)
+  that also rewinds with checkpoints.

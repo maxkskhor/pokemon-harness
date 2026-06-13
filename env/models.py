@@ -104,6 +104,17 @@ class HarnessErrorRequest(BaseModel):
     message: str = Field(min_length=1, max_length=500)
 
 
+class HarnessSteerRequest(BaseModel):
+    # Human-in-the-loop guidance pushed to a live agent. Newlines are collapsed so
+    # the message survives the single-line `steer:<text>` control command encoding.
+    message: str = Field(min_length=1, max_length=500)
+
+    @field_validator("message")
+    @classmethod
+    def normalize_message(cls, value: str) -> str:
+        return " ".join(value.split())
+
+
 class HarnessResumeRequest(BaseModel):
     source_run_id: str = Field(min_length=1, max_length=80)
     checkpoint_name: str = Field(default="_auto_resume", min_length=1, max_length=80)

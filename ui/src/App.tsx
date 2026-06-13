@@ -28,6 +28,7 @@ import {
   saveState,
   screenshotUrl,
   setSpeed,
+  steerHarness,
   stopHarness,
   terminateAgent,
   traceUrl,
@@ -60,6 +61,7 @@ export function App() {
   const [runStates, setRunStates] = useState<SavedState[]>([]);
   const [sharedStates, setSharedStates] = useState<SavedState[]>([]);
   const [checkpointName, setCheckpointName] = useState("");
+  const [steerText, setSteerText] = useState("");
   const [runHistory, setRunHistory] = useState<RunSummary[]>([]);
   const [viewedRunId, setViewedRunId] = useState<string | null>(null);
   const [frameNumbers, setFrameNumbers] = useState<number[]>([]);
@@ -431,6 +433,13 @@ export function App() {
     }, false);
   }
 
+  async function handleSteer() {
+    const message = steerText.trim();
+    if (!selectedHarnessId || !message) return;
+    await runAction(() => steerHarness(selectedHarnessId, message), false);
+    setSteerText("");
+  }
+
   async function handleHarnessReset() {
     if (!selectedHarnessId) return;
     await runAction(async () => {
@@ -556,6 +565,31 @@ export function App() {
             <Metric label="Frame" value={state?.frame ?? "-"} />
             <Metric label="Spend" value={runCostDisplay(events)} />
           </div>
+        </section>
+
+        <section className="steer-band">
+          <input
+            className="steer-input"
+            type="text"
+            placeholder={
+              selectedHarness?.status === "running"
+                ? "Steer the agent — e.g. 'go back south, you passed the exit'"
+                : "Steering is available while an agent is running"
+            }
+            value={steerText}
+            onChange={(event) => setSteerText(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void handleSteer();
+            }}
+            disabled={busy || selectedHarness?.status !== "running"}
+          />
+          <button
+            onClick={() => void handleSteer()}
+            disabled={busy || !steerText.trim() || selectedHarness?.status !== "running"}
+            title="Send a one-off instruction the agent folds into its next turn"
+          >
+            Steer
+          </button>
         </section>
 
         <StatusPanel status={liveStatus} />
