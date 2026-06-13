@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-06-13 (Fire Red default + FRLG journey + replay sync)
+
+### Added
+- **Fire Red milestone journey** (`harness/meta.py` `FRLG_MILESTONES`): same keys/labels as
+  the Gen-1 list (so the UI journey tracker is unchanged) but with FRLG map-id checks and
+  generation-appropriate prompts. `MetaHarness` now holds an instance `milestones` list;
+  the Gym Agent swaps to `FRLG_MILESTONES` at run start when the loaded ROM is `.gba`.
+
+### Changed
+- **Fire Red is now the default game**: `default_rom_path()` prefers `pokefirered.gba`
+  (falls back to the Gen-1 ROMs), so the UI ROM picker and a fresh run default to Fire Red.
+
+### Fixed
+- **Replay conversation didn't follow the scrubber**: it stayed pinned at turn 1 while you
+  scrubbed. The Conversation now scrolls the turn at the scrubbed frame into view, so it
+  tracks the playhead.
+
 ## 2026-06-13 (first leaderboard + bench robustness)
 
 ### Added
