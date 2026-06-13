@@ -175,7 +175,7 @@ def run_model_live(
         stderr=subprocess.DEVNULL,
     )
     try:
-        harness_id = _await_registration(base_url, before, deadline=time.monotonic() + 30)
+        harness_id = _await_registration(base_url, before, deadline=time.monotonic() + 60)
         if harness_id is None:
             raise RuntimeError(f"agent for {model} never registered")
         _api(base_url, "POST", f"/api/harness/{harness_id}/play")

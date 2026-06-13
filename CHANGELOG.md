@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-06-13 (first leaderboard + bench robustness)
+
+### Added
+- **First model leaderboard** in `docs/bench/` — 5 models from the bedroom state, 150-turn
+  cap, stall-abort 100, scored on milestones reached / furthest / turns / cost. Results in
+  `results.json`/`results.md`, write-up + findings + replay instructions in `README.md`,
+  and a self-contained HTML trace per run (`<model>.html`). Headline: the three cheapest
+  models (`gpt-5-nano`, `qwen3.5-flash`, `gemini-2.5-flash-lite`) reached the starter;
+  `gpt-5-mini` and `claude-haiku-4.5` stalled a step earlier; Route 1 was the wall for all.
+  (n=1 per model — a smoke test, not a definitive ranking.)
+
+### Changed
+- `scripts/bench.py` — registration wait raised 30s → 60s; a slow cold-start agent was
+  occasionally recorded as "never registered" (it happened once to gemini, which scored a
+  spurious 0 until re-run).
+
 ## 2026-06-13 (conversation transcript + bigger screen)
 
 ### Added
