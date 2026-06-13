@@ -126,6 +126,7 @@ export function Conversation({
   emptyHint?: string;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const currentRef = useRef<HTMLDivElement | null>(null);
   const atBottom = useRef(true);
   const [sysOpen, setSysOpen] = useState(false);
 
@@ -142,7 +143,14 @@ export function Conversation({
     atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   }
   useEffect(() => {
-    if (upToFrame == null && atBottom.current) ref.current?.scrollTo({ top: ref.current.scrollHeight });
+    if (upToFrame == null) {
+      // Live: follow the newest turn at the bottom.
+      if (atBottom.current) ref.current?.scrollTo({ top: ref.current.scrollHeight });
+    } else {
+      // Replay: scrub to a frame → bring the turn at that frame into view so the
+      // conversation follows the playhead instead of staying pinned at turn 1.
+      currentRef.current?.scrollIntoView({ block: "center", behavior: "auto" });
+    }
   }, [exchanges.length, upToFrame]);
 
   return (
@@ -162,8 +170,14 @@ export function Conversation({
 
       {exchanges.map((x, i) => {
         const last = i === exchanges.length - 1;
+        const isCurrent = last && upToFrame != null;
         return (
-          <div key={x.turnId} className={`exchange${last && upToFrame != null ? " exchange-current" : ""}`} data-status={x.status}>
+          <div
+            key={x.turnId}
+            ref={isCurrent ? currentRef : undefined}
+            className={`exchange${isCurrent ? " exchange-current" : ""}`}
+            data-status={x.status}
+          >
             <div className="exchange-head">
               <span className="exchange-turn">turn {x.turnIndex ?? "?"}</span>
               {x.goal && <span className="exchange-goal">{x.goal}</span>}

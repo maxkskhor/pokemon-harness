@@ -22,7 +22,8 @@ def list_rom_files() -> list[Path]:
 
 
 def default_rom_path() -> Path | None:
-    for name in ("pokered.gbc", "pokeblue.gbc", "BLUEMONS.GB"):
+    # Fire Red is the preferred default game; fall back to the Gen 1 ROMs.
+    for name in ("pokefirered.gba", "pokered.gbc", "pokeblue.gbc", "BLUEMONS.GB"):
         candidate = ROMS_DIR / name
         if candidate.exists():
             return candidate

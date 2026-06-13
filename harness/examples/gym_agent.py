@@ -30,7 +30,7 @@ from dotenv import load_dotenv
 
 from harness import PokemonAgent
 from harness.llm import LLMCallError, LLMClient, provider_from_env
-from harness.meta import MetaConfig, MetaHarness
+from harness.meta import FRLG_MILESTONES, MetaConfig, MetaHarness
 
 load_dotenv()
 
@@ -765,6 +765,15 @@ class GymAgent(PokemonAgent):
             if not self._history:
                 self._history = [_cached(SYSTEM_PROMPT)]
         self._run_cost = 0.0
+
+        # Pick the milestone journey for the loaded game: Fire Red (.gba) uses FRLG map ids.
+        try:
+            rom = (self.state().get("rom") or {}).get("filename", "") or ""
+            if rom.lower().endswith(".gba"):
+                self._meta.milestones = FRLG_MILESTONES
+                self.emit("lifecycle", {"status": "frlg_milestones", "rom": rom})
+        except Exception:
+            pass
 
         while not self.should_stop():
             # Headless benchmark stop conditions (scripts/bench.py): a turn cap and

@@ -158,6 +158,87 @@ MILESTONES: list[Milestone] = [
 ]
 
 
+# Pokemon Fire Red (Gen 3) journey. Same keys/labels as MILESTONES (so the UI journey
+# tracker is unchanged), but checks use FRLG map ids and the prompts avoid Gen-1-specific
+# tile coordinates (the FRLG house/lab layouts differ). FRLG map id = (group << 8) | num;
+# ids confirmed from env.pokefirered_names: house 1F=1024, Pallet=768, Oak's lab=1027,
+# Route 1=787, Viridian=769, Route 2=788, Viridian Forest=256, Pewter=770, Pewter gym=1538.
+FRLG_MILESTONES: list[Milestone] = [
+    Milestone(
+        "leave-bedroom", "Leave the bedroom",
+        "You start in your bedroom upstairs. Walk to the staircase (warp tile) and go "
+        "DOWN to the ground floor of your house.",
+        lambda s, done: _map_id(s) == 1024,
+    ),
+    Milestone(
+        "exit-house", "Step outside",
+        "You are on the ground floor. Walk DOWN to the door at the bottom and step outside "
+        "into Pallet Town.",
+        lambda s, done: _map_id(s) == 768,
+    ),
+    Milestone(
+        "get-starter", "Get a starter Pokemon",
+        "Leave Pallet Town by the gap in the trees at the TOP and walk UP — Professor Oak "
+        "will stop you and bring you into his lab. Walk up to the table with the pokeballs, "
+        "face the middle one and call take_starter() (Squirtle is strong vs the first gym). "
+        "A rival battle follows — fight with battle_move(1); win or lose, the story goes on.",
+        lambda s, done: _has_real_pokemon(s),
+    ),
+    Milestone(
+        "route-1", "Reach Route 1",
+        "Leave Oak's lab (door at the bottom), go to Pallet Town's north exit and walk UP "
+        "onto Route 1. Fight wild Pokemon with battle_move(1) for experience.",
+        lambda s, done: _map_id(s) == 787,
+    ),
+    Milestone(
+        "viridian-city", "Reach Viridian City",
+        "Walk north through Route 1 until you enter Viridian City.",
+        lambda s, done: _map_id(s) == 769,
+    ),
+    Milestone(
+        "deliver-parcel", "Deliver Oak's Parcel",
+        "In Viridian City the Poke Mart clerk gives you Oak's Parcel. Walk back south "
+        "through Route 1 to Pallet Town and into Oak's lab; talk to Oak to deliver it and "
+        "get the Pokedex.",
+        lambda s, done: "viridian-city" in done and _map_id(s) == 1027,
+    ),
+    Milestone(
+        "route-2", "Head north to Route 2",
+        "Return north to Viridian City (heal at the Pokemon Center if hurt), then walk "
+        "north out of the city onto Route 2.",
+        lambda s, done: "deliver-parcel" in done and _map_id(s) == 788,
+    ),
+    Milestone(
+        "viridian-forest", "Enter Viridian Forest",
+        "Go north on Route 2 and through the gate into Viridian Forest.",
+        lambda s, done: _map_id(s) == 256,
+    ),
+    Milestone(
+        "pewter-city", "Reach Pewter City",
+        "Navigate north through Viridian Forest (trainers will battle you — use your "
+        "strongest move) and continue to Pewter City.",
+        lambda s, done: _map_id(s) == 770,
+    ),
+    Milestone(
+        "ready-for-gym", "Train to level 10+",
+        "Before the gym, get your lead Pokemon to at least level 10. Fight wild Pokemon if "
+        "under-leveled; heal at the Pokemon Center below half HP.",
+        lambda s, done: "pewter-city" in done and _max_level(s) >= 10,
+    ),
+    Milestone(
+        "pewter-gym", "Enter Pewter Gym",
+        "Heal first, then enter the Pewter City Gym (north-west grey building).",
+        lambda s, done: _map_id(s) == 1538,
+    ),
+    Milestone(
+        "boulder-badge", "Beat Brock — Boulder Badge",
+        "Talk to Brock to start the fight. His Geodude and Onix are Rock/Ground — water "
+        "moves do 4x damage. Use battle_move on your water move every turn.",
+        lambda s, done: "Boulder" in (s.get("badges") or []),
+    ),
+]
+
+
 @dataclass
 class MetaConfig:
     budget_usd: float = 3.0
@@ -193,12 +274,16 @@ class MetaHarness:
         save_checkpoint: Callable[[str], Any],
         load_checkpoint: Callable[[str], Any],
         config: MetaConfig | None = None,
+        milestones: list[Milestone] | None = None,
     ) -> None:
         self._emit = emit
         self._save = save_checkpoint
         self._load = load_checkpoint
         self.config = config or MetaConfig()
         self.state = MetaState()
+        # Milestone journey (defaults to Pokemon Red/Blue; swap to FRLG_MILESTONES for
+        # Fire Red). Same keys/labels across generations so the UI journey tracker works.
+        self.milestones = milestones if milestones is not None else MILESTONES
 
     # ── persistence (rides along in checkpoint sidecars) ─────────────
 
@@ -259,7 +344,7 @@ class MetaHarness:
             }
 
         progressed = False
-        for index, milestone in enumerate(MILESTONES):
+        for index, milestone in enumerate(self.milestones):
             if milestone.key in done:
                 continue
             try:
@@ -286,7 +371,7 @@ class MetaHarness:
                     "key": milestone.key,
                     "label": milestone.label,
                     "index": index,
-                    "total": len(MILESTONES),
+                    "total": len(self.milestones),
                     "turn": s.turns,
                     "run_cost_usd": round(run_cost_usd, 4),
                     "checkpoint": checkpoint,
@@ -342,7 +427,7 @@ class MetaHarness:
 
     def current_milestone(self) -> Milestone | None:
         done = set(self.state.reached)
-        for milestone in MILESTONES:
+        for milestone in self.milestones:
             if milestone.key not in done:
                 return milestone
         return None
@@ -352,7 +437,7 @@ class MetaHarness:
         if milestone is None:
             return "All milestones complete! Keep exploring."
         done = len(self.state.reached)
-        return f"[{done}/{len(MILESTONES)} milestones] {milestone.label}: {milestone.goal}"
+        return f"[{done}/{len(self.milestones)} milestones] {milestone.label}: {milestone.goal}"
 
     def model(self) -> str:
         if self.state.turns_since_progress >= self.config.escalate_after_turns:
@@ -363,5 +448,5 @@ class MetaHarness:
         done = set(self.state.reached)
         return [
             {"key": m.key, "label": m.label, "reached": m.key in done}
-            for m in MILESTONES
+            for m in self.milestones
         ]

@@ -1,6 +1,21 @@
 from __future__ import annotations
 
-from harness.meta import MILESTONES, MetaConfig, MetaHarness
+from harness.meta import FRLG_MILESTONES, MILESTONES, MetaConfig, MetaHarness
+
+
+def test_frlg_milestones_mirror_gen1_keys_and_labels() -> None:
+    # Same keys + labels across generations so the UI journey tracker (keyed by milestone
+    # key) works for both Red/Blue and Fire Red; only the checks/prompts differ.
+    assert [m.key for m in FRLG_MILESTONES] == [m.key for m in MILESTONES]
+    assert [m.label for m in FRLG_MILESTONES] == [m.label for m in MILESTONES]
+
+
+def test_frlg_checks_use_frlg_map_ids() -> None:
+    by_key = {m.key: m for m in FRLG_MILESTONES}
+    # House 1F = 1024, Pallet Town = 768 (FRLG ids), not the Gen-1 37 / 0.
+    assert by_key["leave-bedroom"].check({"map_id": 1024}, set()) is True
+    assert by_key["leave-bedroom"].check({"map_id": 37}, set()) is False
+    assert by_key["exit-house"].check({"map_id": 768}, set()) is True
 
 
 def make_meta(**config_kwargs):
