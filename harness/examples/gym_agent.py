@@ -22,6 +22,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import threading
 from typing import Any
 
@@ -167,6 +168,61 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
 ]
+
+
+_TEXT_TOOL_RE = re.compile(
+    r"\b(move|goto|press|battle_move|run_away|note|take_starter)\s*\(([^)]*)\)",
+    re.IGNORECASE,
+)
+_BUTTON_RE = re.compile(r"START|SELECT|UP|DOWN|LEFT|RIGHT|A|B", re.IGNORECASE)
+
+
+def parse_text_tool_call(content: str | None) -> tuple[str, dict[str, Any]] | None:
+    """Recover a tool call from an assistant's *text* when it returned no structured one.
+
+    Some OpenRouter models (e.g. qwen) ignore the tool-call protocol and instead write the
+    call into the message content as text — `move("direction":"DOWN","steps":1)`,
+    `press(["A"])`, `goto(7,4)`, `battle_move(1)`. Without this the harness sees "no tool
+    call" and burns the whole turn. We take the LAST recognizable call (the model's final
+    decision) and normalize its args to what `_execute_tool` expects.
+    """
+    if not content:
+        return None
+    matches = _TEXT_TOOL_RE.findall(content)
+    if not matches:
+        return None
+    name, raw = matches[-1]
+    name = name.lower()
+    raw = raw.strip()
+    if name in ("run_away", "take_starter"):
+        return name, {}
+    # Named-arg object first: move("direction":"UP","steps":2) -> {"direction":...}
+    try:
+        obj = json.loads("{" + raw + "}")
+        if isinstance(obj, dict) and obj:
+            return name, obj
+    except (json.JSONDecodeError, ValueError):
+        pass
+    if name == "goto":
+        nums = re.findall(r"-?\d+", raw)
+        if len(nums) >= 2:
+            return name, {"x": int(nums[0]), "y": int(nums[1])}
+    elif name == "battle_move":
+        nums = re.findall(r"-?\d+", raw)
+        if nums:
+            return name, {"slot": int(nums[0])}
+    elif name == "move":
+        direction = re.search(r"UP|DOWN|LEFT|RIGHT", raw, re.IGNORECASE)
+        steps = re.search(r"\d+", raw)
+        if direction:
+            return name, {"direction": direction.group().upper(), "steps": int(steps.group()) if steps else 1}
+    elif name == "press":
+        buttons = [b.upper() for b in _BUTTON_RE.findall(raw)]
+        if buttons:
+            return name, {"buttons": buttons}
+    elif name == "note":
+        return name, {"text": raw.strip("\"'")}
+    return None
 
 
 def _strip_image_urls(value: Any) -> Any:
@@ -856,6 +912,14 @@ class GymAgent(PokemonAgent):
                 },
             })
             if not tool_calls:
+                # Some models emit the call as text instead of a structured tool_call.
+                # Recover it so the turn isn't wasted (the qwen failure mode).
+                parsed = parse_text_tool_call(response.content)
+                if parsed is not None:
+                    name, args = parsed
+                    result = self._execute_tool(name, args)
+                    actions.append({"tool": name, "args": args, "result": result, "via": "text"})
+                    break
                 if actions:
                     break
                 messages.append({"role": "assistant", "content": response.content})

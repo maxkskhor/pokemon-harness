@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-06-13 (model-compat: recover text-emitted tool calls)
+
+### Fixed
+- **Agent wasted every turn on models that emit tool calls as text.** Some OpenRouter
+  models (observed: `qwen/qwen3.5-flash-02-23`) ignore the structured tool-call protocol
+  and write the call into the message content (`move("direction":"DOWN","steps":1)`,
+  `press(["A"])`, `goto(7,4)`). The Gym Agent saw no `tool_calls` and emitted "(no action)"
+  turn after turn until the no-progress rollback fired — effectively stuck. Added
+  `parse_text_tool_call()` to recover the call from the content (last recognizable call
+  wins; args normalized per tool) and execute it. Verified live: qwen went from 0 progress
+  to reaching milestones, with 0 "(no action)" turns and calls recovered from text.
+  Tests in `tests/test_gym_agent.py`.
+
 ## 2026-06-13 (UI polish + black-frame fix)
 
 ### Fixed

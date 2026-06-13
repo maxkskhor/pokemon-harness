@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from harness.examples.gym_agent import GymAgent
+from harness.examples.gym_agent import GymAgent, parse_text_tool_call
 
 
 def make_agent() -> GymAgent:
@@ -120,6 +120,27 @@ def test_update_world_emits_on_first_visit_only() -> None:
     assert len(world_updates) == 2  # one per newly discovered map, not per visit
     assert agent._world[0]["visits"] == 2
     assert {u["map_id"] for u in world_updates} == {0, 12}
+
+
+def test_parse_text_tool_call_recovers_calls_emitted_as_text() -> None:
+    # The exact shapes qwen produced in content instead of structured tool_calls.
+    assert parse_text_tool_call('move("direction":"DOWN","steps":1)') == ("move", {"direction": "DOWN", "steps": 1})
+    assert parse_text_tool_call('press(["A"])') == ("press", {"buttons": ["A"]})
+    assert parse_text_tool_call("goto(7,4)") == ("goto", {"x": 7, "y": 4})
+    assert parse_text_tool_call("battle_move(1)") == ("battle_move", {"slot": 1})
+    assert parse_text_tool_call("run_away()") == ("run_away", {})
+    assert parse_text_tool_call("take_starter()") == ("take_starter", {})
+    assert parse_text_tool_call('note("found the exit")') == ("note", {"text": "found the exit"})
+
+
+def test_parse_text_tool_call_takes_last_call_and_ignores_prose() -> None:
+    # Prose mentioning a tool without parens is not a call.
+    assert parse_text_tool_call("I should move down now") is None
+    assert parse_text_tool_call("") is None
+    assert parse_text_tool_call(None) is None
+    # When several appear, the final decision wins.
+    text = "First I considered goto(1,2) but actually move(\"direction\":\"UP\",\"steps\":3)"
+    assert parse_text_tool_call(text) == ("move", {"direction": "UP", "steps": 3})
 
 
 def test_observation_includes_steer_and_visited_maps() -> None:
