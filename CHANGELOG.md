@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-06-13 (UI polish + black-frame fix)
+
+### Fixed
+- **Black observation/spectator frames**: the agent pauses the emulator at turn start,
+  so if the previous action ended mid-transition (a map-change fade), both the model's
+  observation screenshot and the live spectator screen caught a black frame. `GymAgent`
+  now lets the overworld settle (a short wait, skipped in battle) before screenshotting.
+  Measured black-frame rate dropped from ~11% to ~4% on a fresh run. (The screenshot
+  pipeline itself was correct — verified loading a save state renders fine; the remaining
+  black frames are genuine boot/fade moments.)
+- **Inspect filter row**: the toolbar's filter chips now claim their own row so the event
+  count and Reload button stay cleanly right-aligned when filters wrap.
+
 ## 2026-06-13 (UI rewrite — tabbed workspace + spectator view)
 
 ### Added

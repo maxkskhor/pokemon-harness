@@ -781,6 +781,13 @@ class GymAgent(PokemonAgent):
 
     def _play_one_turn(self) -> None:
         self._autoplay_cutscene()
+        # Let any in-flight overworld transition (a map-change fade, the tail of a
+        # step animation) finish before we screenshot. Otherwise the agent pauses
+        # mid-fade and both the model's observation image AND the live spectator
+        # view catch a black transition frame. Skipped in battle so we don't tick
+        # past attack/HP animations the agent needs to read.
+        if not self._status().get("battle"):
+            self.sequence([{"type": "wait", "frames": 12}])
         # Human-in-the-loop: fold any guidance typed in the UI into this turn's
         # observation and persist it to notes so it carries across a few turns.
         steer = self.take_steering()
