@@ -1,7 +1,6 @@
-import { Pause, RefreshCw } from "lucide-react";
+import { Eye, History, ListTree, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
-  API_BASE,
   AgentDefinition,
   HarnessAgent,
   PokemonState,
@@ -36,15 +35,14 @@ import {
 } from "./api";
 import { AgentPanel } from "./agents/AgentPanel";
 import { Checkpoints } from "./checkpoints/Checkpoints";
-import { JourneyPanel } from "./journey/JourneyPanel";
 import { ReplayBar } from "./checkpoints/ReplayBar";
 import { RunPicker } from "./run-picker/RunPicker";
-import { StatusPanel } from "./status/StatusPanel";
 import { TraceFilters } from "./trace/TraceFilters";
 import { TraceList } from "./trace/TraceList";
 import { NOISY_EVENT_TYPES, type FilterType } from "./trace/helpers";
+import { WatchView } from "./watch/WatchView";
 
-const speeds = ["paused", "1x", "5x", "max"];
+type Tab = "watch" | "inspect" | "runs";
 
 export function App() {
   const [state, setState] = useState<PokemonState | null>(null);
@@ -61,7 +59,7 @@ export function App() {
   const [runStates, setRunStates] = useState<SavedState[]>([]);
   const [sharedStates, setSharedStates] = useState<SavedState[]>([]);
   const [checkpointName, setCheckpointName] = useState("");
-  const [steerText, setSteerText] = useState("");
+  const [tab, setTab] = useState<Tab>("watch");
   const [runHistory, setRunHistory] = useState<RunSummary[]>([]);
   const [viewedRunId, setViewedRunId] = useState<string | null>(null);
   const [frameNumbers, setFrameNumbers] = useState<number[]>([]);
@@ -433,11 +431,9 @@ export function App() {
     }, false);
   }
 
-  async function handleSteer() {
-    const message = steerText.trim();
-    if (!selectedHarnessId || !message) return;
-    await runAction(() => steerHarness(selectedHarnessId, message), false);
-    setSteerText("");
+  async function handleSteer(message: string) {
+    if (!selectedHarnessId || !message.trim()) return;
+    await runAction(() => steerHarness(selectedHarnessId, message.trim()), false);
   }
 
   async function handleHarnessReset() {
@@ -497,198 +493,174 @@ export function App() {
   }
 
   const liveStatus = !isViewingPastRun ? state?.status ?? null : null;
+  // A turn only counts as "running" when the live agent is actively running it —
+  // never on a past run we're merely viewing.
+  const liveRunning =
+    !isViewingPastRun &&
+    (selectedHarness?.status === "running" || selectedHarness?.status === "starting");
+
+  const tabs: { id: Tab; label: string; icon: typeof Eye }[] = [
+    { id: "watch", label: "Watch", icon: Eye },
+    { id: "inspect", label: "Inspect", icon: ListTree },
+    { id: "runs", label: "Runs", icon: History },
+  ];
 
   return (
-    <main className="app-shell">
-      <section className="game-pane">
-        <header className="topbar">
-          <div>
-            <h1>Pokemon Harness</h1>
-            <span className="connection-status">
-              <span>API {API_BASE}</span>
-              <span>WebSocket {wsConnected ? "● connected" : "○ disconnected"}</span>
+    <div className="app">
+      <nav className="rail">
+        <div className="rail-brand">
+          <span className="brand-mark" aria-hidden />
+          <div className="rail-brand-text">
+            <strong>Pokémon Harness</strong>
+            <span className={`conn ${wsConnected ? "on" : "off"}`}>
+              <span className="conn-dot" />
+              {wsConnected ? "connected" : "offline"}
             </span>
           </div>
-          <div className="topbar-context">
-            {isViewingPastRun ? (
-              <span className="screen-mode-badge replaying">viewing {viewedRunId}</span>
-            ) : state ? (
-              <span className="screen-mode-badge live">
-                {state.rom.title ?? state.rom.filename} · {state.run_id}
-              </span>
-            ) : null}
-          </div>
-        </header>
-
-        {error ? <pre className="error">{error}</pre> : null}
-
-        <JourneyPanel events={events} />
-
-        <div className="screen-wrap">
-          {screenSrc ? (
-            <img className="game-screen" src={screenSrc} alt="Pokemon emulator frame" />
-          ) : (
-            <div className="empty-screen">
-              {isViewingPastRun ? "No captured frames for this run" : "No active run — launch an agent and press Start"}
-            </div>
-          )}
-          {scrubPreviewFrame != null && <span className="screen-overlay">REPLAY</span>}
         </div>
 
-        <ReplayBar
-          runId={screenRunId}
-          frames={frameNumbers}
-          previewFrame={scrubPreviewFrame}
-          checkpoints={runStates}
+        <AgentPanel
+          agents={agentDefs}
+          harnessAgents={harnessAgents}
+          selectedHarnessId={selectedHarnessId}
+          onSelectHarness={setSelectedHarnessId}
+          roms={roms}
+          selectedRom={selectedRom}
+          onSelectRom={setSelectedRom}
+          primaryIntent={primaryIntent}
+          resumeBlocker={resumeBlocker}
           busy={busy}
-          canRewind={!isViewingPastRun && state != null}
-          onPreviewFrame={setScrubPreviewFrame}
-          onRewind={handleLoadCheckpoint}
+          onPlay={handleHarnessPlay}
+          onResume={handleHarnessResume}
+          onStop={handleHarnessStop}
+          onReset={handleHarnessReset}
+          onLaunch={handleLaunchAgent}
+          onTerminate={handleTerminateAgent}
         />
 
-        <section className="control-band">
-          <div className="speed-controls">
-            <span className="speed-label">Emulator speed</span>
-            {speeds.map((mode) => (
-              <button
-                key={mode}
-                className={state?.speed_mode === mode ? "selected" : ""}
-                onClick={() => runAction(() => setSpeed(mode))}
-                disabled={!state || busy || isViewingPastRun}
-                title={mode === "paused" ? "Freeze background; agent still acts" : `Run at ${mode}`}
-              >
-                {mode === "paused" ? <Pause size={14} /> : null}{mode}
+        {error ? <pre className="error">{error}</pre> : null}
+      </nav>
+
+      <div className="workspace">
+        <header className="tabbar">
+          <div className="tabs">
+            {tabs.map(({ id, label, icon: Icon }) => (
+              <button key={id} data-active={tab === id} onClick={() => setTab(id)}>
+                <Icon size={15} /> {label}
               </button>
             ))}
           </div>
-          <div className="metric-strip">
-            <Metric label="Frame" value={state?.frame ?? "-"} />
-            <Metric label="Spend" value={runCostDisplay(events)} />
-          </div>
-        </section>
-
-        <section className="steer-band">
-          <input
-            className="steer-input"
-            type="text"
-            placeholder={
-              selectedHarness?.status === "running"
-                ? "Steer the agent — e.g. 'go back south, you passed the exit'"
-                : "Steering is available while an agent is running"
-            }
-            value={steerText}
-            onChange={(event) => setSteerText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") void handleSteer();
-            }}
-            disabled={busy || selectedHarness?.status !== "running"}
-          />
-          <button
-            onClick={() => void handleSteer()}
-            disabled={busy || !steerText.trim() || selectedHarness?.status !== "running"}
-            title="Send a one-off instruction the agent folds into its next turn"
-          >
-            Steer
-          </button>
-        </section>
-
-        <StatusPanel status={liveStatus} />
-
-        <Checkpoints
-          state={state}
-          viewedRunId={viewedRunId}
-          runStates={runStates}
-          sharedStates={sharedStates}
-          checkpointName={checkpointName}
-          onCheckpointNameChange={setCheckpointName}
-          onSave={handleSaveCheckpoint}
-          onLoad={handleLoadCheckpoint}
-          onDelete={handleDeleteCheckpoint}
-          busy={busy}
-        />
-      </section>
-
-      <aside className="trace-pane">
-        <header className="harness-header">
-          <AgentPanel
-            agents={agentDefs}
-            harnessAgents={harnessAgents}
-            selectedHarnessId={selectedHarnessId}
-            onSelectHarness={setSelectedHarnessId}
-            roms={roms}
-            selectedRom={selectedRom}
-            onSelectRom={setSelectedRom}
-            primaryIntent={primaryIntent}
-            resumeBlocker={resumeBlocker}
-            busy={busy}
-            onPlay={handleHarnessPlay}
-            onResume={handleHarnessResume}
-            onStop={handleHarnessStop}
-            onReset={handleHarnessReset}
-            onLaunch={handleLaunchAgent}
-            onTerminate={handleTerminateAgent}
-          />
-          <RunPicker
-            activeRunId={state?.run_id ?? null}
-            viewedRunId={viewedRunId}
-            runHistory={runHistory}
-            onSelectRun={handleSelectRun}
-          />
-          <div className="trace-title-row">
-            <div>
-              <h2>Trace</h2>
-              <span>
-                {events.length} events
-                {viewedRunId ? ` · viewing ${viewedRunId}` : ""}
+          <div className="tabbar-context">
+            {isViewingPastRun ? (
+              <span className="ctx viewing">viewing {viewedRunId}</span>
+            ) : state ? (
+              <span className="ctx live">
+                <span className="live-dot" />
+                {state.rom.title ?? state.rom.filename} · {state.run_id}
               </span>
-            </div>
-            <button onClick={handleReloadTraces} disabled={busy || (!eventRunIdRef.current && !viewedRunId)}>
-              <RefreshCw size={14} /> Reload
-            </button>
+            ) : (
+              <span className="ctx idle">no active run</span>
+            )}
           </div>
-          <TraceFilters filters={traceFilters} onChange={setTraceFilters} showImages={showImages} onToggleImages={setShowImages} />
         </header>
 
-        <div className="harness-events">
-          <TraceList
-            events={events}
-            filters={traceFilters}
-            showImages={showImages}
-            isRunning={selectedHarness?.status === "running" || selectedHarness?.status === "starting"}
-            autoScroll={scrubPreviewFrame == null}
-            runStates={viewedRunId === null ? runStates : []}
-            onLoadCheckpoint={viewedRunId === null ? handleLoadCheckpoint : undefined}
-            onSaveCheckpoint={viewedRunId === null && state ? handleSaveCheckpoint : undefined}
-          />
+        <div className="tab-body">
+          {tab === "watch" && (
+            <WatchView
+              screenSrc={screenSrc}
+              isViewingPastRun={isViewingPastRun}
+              status={liveStatus}
+              events={events}
+              thinking={Boolean(liveRunning)}
+              canSteer={selectedHarness?.status === "running" && !busy}
+              onSteer={(message) => void handleSteer(message)}
+              speedMode={state?.speed_mode ?? null}
+              onSetSpeed={(mode) => void runAction(() => setSpeed(mode))}
+              speedDisabled={!state || busy || isViewingPastRun}
+            />
+          )}
+
+          {tab === "inspect" && (
+            <section className="inspect">
+              <div className="inspect-toolbar">
+                <TraceFilters
+                  filters={traceFilters}
+                  onChange={setTraceFilters}
+                  showImages={showImages}
+                  onToggleImages={setShowImages}
+                />
+                <span className="inspect-count">
+                  {events.length} events{viewedRunId ? ` · viewing ${viewedRunId}` : ""}
+                </span>
+                <button
+                  className="ghost"
+                  onClick={handleReloadTraces}
+                  disabled={busy || (!eventRunIdRef.current && !viewedRunId)}
+                >
+                  <RefreshCw size={14} /> Reload
+                </button>
+              </div>
+              <div className="inspect-body">
+                <TraceList
+                  events={events}
+                  filters={traceFilters}
+                  showImages={showImages}
+                  isRunning={Boolean(liveRunning)}
+                  autoScroll={scrubPreviewFrame == null}
+                  runStates={viewedRunId === null ? runStates : []}
+                  onLoadCheckpoint={viewedRunId === null ? handleLoadCheckpoint : undefined}
+                  onSaveCheckpoint={viewedRunId === null && state ? handleSaveCheckpoint : undefined}
+                />
+              </div>
+            </section>
+          )}
+
+          {tab === "runs" && (
+            <section className="runs">
+              <div className="runs-stage">
+                <div className="runs-screen-wrap">
+                  {screenSrc ? (
+                    <img className="watch-screen" src={screenSrc} alt="Run frame" />
+                  ) : (
+                    <div className="watch-screen-empty">Select a run to replay its frames</div>
+                  )}
+                  {scrubPreviewFrame != null && <span className="screen-overlay">REPLAY</span>}
+                </div>
+                <ReplayBar
+                  runId={screenRunId}
+                  frames={frameNumbers}
+                  previewFrame={scrubPreviewFrame}
+                  checkpoints={runStates}
+                  busy={busy}
+                  canRewind={!isViewingPastRun && state != null}
+                  onPreviewFrame={setScrubPreviewFrame}
+                  onRewind={handleLoadCheckpoint}
+                />
+              </div>
+              <aside className="runs-side">
+                <RunPicker
+                  activeRunId={state?.run_id ?? null}
+                  viewedRunId={viewedRunId}
+                  runHistory={runHistory}
+                  onSelectRun={handleSelectRun}
+                />
+                <Checkpoints
+                  state={state}
+                  viewedRunId={viewedRunId}
+                  runStates={runStates}
+                  sharedStates={sharedStates}
+                  checkpointName={checkpointName}
+                  onCheckpointNameChange={setCheckpointName}
+                  onSave={handleSaveCheckpoint}
+                  onLoad={handleLoadCheckpoint}
+                  onDelete={handleDeleteCheckpoint}
+                  busy={busy}
+                />
+              </aside>
+            </section>
+          )}
         </div>
-      </aside>
-    </main>
-  );
-}
-
-function runCostDisplay(events: TraceEvent[]): string {
-  // Walk events in reverse to find the latest run_cost_usd
-  for (let i = events.length - 1; i >= 0; i--) {
-    const e = events[i];
-    if (e.type === "budget_exceeded") {
-      const cost = (e.payload as Record<string, unknown>).run_cost_usd;
-      if (typeof cost === "number") return `$${cost.toFixed(3)} LIMIT`;
-    }
-    if (e.type === "llm_call") {
-      const usage = (e.payload as Record<string, unknown>).usage as Record<string, unknown> | undefined;
-      const cost = usage?.run_cost_usd;
-      if (typeof cost === "number") return `$${cost.toFixed(3)}`;
-    }
-  }
-  return "-";
-}
-
-function Metric({ label, value }: { label: string; value: string | number }) {
-  const textValue = String(value);
-  return (
-    <div className="metric">
-      <span>{label}</span>
-      <strong title={textValue}>{value}</strong>
+      </div>
     </div>
   );
 }

@@ -90,7 +90,7 @@ export function TraceList({
 
   return (
     <ol className="trace-list" ref={listRef} onScroll={handleScroll}>
-      {turnIds.map((turn_id) => (
+      {turnIds.map((turn_id, idx) => (
         <TurnCard
           key={turn_id}
           turn_id={turn_id}
@@ -100,6 +100,8 @@ export function TraceList({
           runStates={runStates}
           onLoadCheckpoint={onLoadCheckpoint}
           onSaveCheckpoint={onSaveCheckpoint}
+          isLastTurn={idx === turnIds.length - 1}
+          liveRunning={isRunning}
         />
       ))}
       {hasSession && (

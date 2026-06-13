@@ -392,7 +392,10 @@ class GymAgent(PokemonAgent):
         if entry is None:
             entry = {
                 "name": status.get("map_name") or f"map {map_id}",
-                "first_turn": self._meta.state.turns,
+                # _turn_counter is the 1-based current turn (incremented on turn()
+                # entry); meta.state.turns isn't bumped until the end-of-turn
+                # observe(), so it would record a turn too low here.
+                "first_turn": self._turn_counter,
                 "visits": 0,
                 "connections": {},
             }

@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-06-13 (UI rewrite — tabbed workspace + spectator view)
+
+### Added
+- **Tabbed workspace UI** (`ui/src/App.tsx` render rewrite, data/WebSocket logic kept):
+  a persistent control rail (brand, connection, agent rows, ROM, Start/Stop/Reset) plus
+  three tabs:
+  - **Watch** (`ui/src/watch/WatchView.tsx`, `watch/thought.ts`) — a clean spectator view
+    in the spirit of "Claude Plays Pokemon": large game screen, a live **agent narration**
+    stream that surfaces the model's reasoning + the action it took per turn (with
+    milestone/rollback/steer banners and a "what it saw" toggle), current objective,
+    journey dots, party, key stats, and an inline steer box. No raw JSON.
+  - **Inspect** — the full turn-by-turn trace (filters, LLM calls, frame thumbnails, raw
+    payloads) for deep observability.
+  - **Runs** — frame-scrubber replay, run picker, and checkpoints (rewind/branch).
+- New design-system layer in `ui/src/styles.css` (CSS variables, refined dark theme,
+  rounded surfaces, pill tabs).
+
+### Fixed
+- **Stale "running" turn indicator**: a turn with no `turn_finished` (agent killed/stopped
+  mid-turn, or any past run) showed a perpetual green "running" pulse. `TurnCard` now only
+  renders "running" for the genuinely-live last turn of a currently-running agent;
+  otherwise it shows "interrupted". `TraceList` passes `isLastTurn`/`liveRunning`, and the
+  live-running flag is false whenever a past run is being viewed.
+- **`world_update` off-by-one**: `GymAgent._update_world` recorded `discovered_turn` from
+  `meta.state.turns` (not yet incremented for the current turn); now uses the 1-based
+  `_turn_counter`.
+
 ## 2026-06-13
 
 ### Added

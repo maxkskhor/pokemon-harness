@@ -139,6 +139,8 @@ export function TurnCard({
   runStates = [],
   onLoadCheckpoint,
   onSaveCheckpoint,
+  isLastTurn = false,
+  liveRunning = false,
 }: {
   turn_id: string;
   events: TraceEvent[];
@@ -147,6 +149,8 @@ export function TurnCard({
   runStates?: SavedState[];
   onLoadCheckpoint?: (name: string) => void;
   onSaveCheckpoint?: () => void;
+  isLastTurn?: boolean;
+  liveRunning?: boolean;
 }) {
   const [rawExpanded, setRawExpanded] = useState(false);
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
@@ -162,8 +166,19 @@ export function TurnCard({
           .sort((a, b) => (b.frame as number) - (a.frame as number))[0] ?? null
       : null;
 
+  // A turn with no turn_finished is only genuinely "running" when it's the last
+  // turn of a live, currently-running agent. On a stopped/past run (or any earlier
+  // unfinished turn), it was interrupted — never show a perpetual "running" pulse.
+  const displayStatus: "ok" | "error" | "running" | "interrupted" =
+    s.status === "in-progress" ? (isLastTurn && liveRunning ? "running" : "interrupted") : s.status;
   const statusClass =
-    s.status === "ok" ? "turn-status-ok" : s.status === "error" ? "turn-status-error" : "turn-status-running";
+    displayStatus === "ok"
+      ? "turn-status-ok"
+      : displayStatus === "error"
+        ? "turn-status-error"
+        : displayStatus === "interrupted"
+          ? "turn-status-interrupted"
+          : "turn-status-running";
   const showThumbnail = showImages && s.frame != null && !thumbnailFailed;
 
   const rawEvents = s.events.filter(
@@ -172,16 +187,16 @@ export function TurnCard({
   const rawCount = rawEvents.length;
 
   return (
-    <li className="turn-card" data-status={s.status}>
+    <li className="turn-card" data-status={displayStatus}>
       <div className="turn-card-header">
         <span className="turn-card-id">
           {s.turn_index != null ? `turn-${String(s.turn_index).padStart(3, "0")}` : turn_id}
         </span>
         <span className={`turn-card-status ${statusClass}`}>
-          {s.status === "in-progress" ? (
+          {displayStatus === "running" ? (
             <><span className="run-pulse" /> running</>
           ) : (
-            s.status
+            displayStatus
           )}
         </span>
         {s.elapsed_ms != null && (
