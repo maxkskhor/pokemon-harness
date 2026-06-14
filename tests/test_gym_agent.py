@@ -33,6 +33,28 @@ def test_astar_returns_none_when_boxed_in() -> None:
     assert astar((5, 5), (5, 8), walls) is None
 
 
+def _positions(start, path):
+    delta = {"UP": (0, -1), "DOWN": (0, 1), "LEFT": (-1, 0), "RIGHT": (1, 0)}
+    x, y = start
+    out = []
+    for d in path:
+        dx, dy = delta[d]
+        x, y = x + dx, y + dy
+        out.append((x, y))
+    return out
+
+
+def test_astar_does_not_route_through_warp_tiles() -> None:
+    # Heading up past a stairs warp at (7,1): A* must detour around it, never step on it
+    # (stepping on a warp teleports). A path still exists (via the neighbouring column).
+    path = astar((7, 3), (7, 0), set(), avoid=frozenset({(7, 1)}))
+    assert path is not None and _walk((7, 3), path) == (7, 0)
+    assert (7, 1) not in _positions((7, 3), path)
+    # But A* may still END on a warp tile when it IS the destination (to use the door).
+    path2 = astar((7, 3), (7, 1), set(), avoid=frozenset({(7, 1)}))
+    assert path2 is not None and _walk((7, 3), path2) == (7, 1)
+
+
 def make_agent() -> GymAgent:
     with patch("harness.examples.gym_agent.LLMClient"), \
          patch("harness.examples.gym_agent.provider_from_env"):

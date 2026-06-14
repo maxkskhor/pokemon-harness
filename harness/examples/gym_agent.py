@@ -228,12 +228,20 @@ def parse_text_tool_call(content: str | None) -> tuple[str, dict[str, Any]] | No
 _DELTA = {"UP": (0, -1), "DOWN": (0, 1), "LEFT": (-1, 0), "RIGHT": (1, 0)}
 
 
-def astar(start: tuple[int, int], target: tuple[int, int], walls: set[str], pad: int = 8) -> list[str] | None:
+def astar(
+    start: tuple[int, int],
+    target: tuple[int, int],
+    walls: set[str],
+    avoid: frozenset[tuple[int, int]] = frozenset(),
+    pad: int = 8,
+) -> list[str] | None:
     """Shortest path of directions from start to target, routing around known walls.
 
-    `walls` holds directed blockers "x,y,DIR" (from a tile you can't step DIR). Unknown
-    edges are treated as walkable (optimistic) — the caller re-plans when a step reveals a
-    new wall. Search is bounded to a box around start/target so it stays cheap. Replaces
+    `walls` holds directed blockers "x,y,DIR" (from a tile you can't step DIR). `avoid` is
+    a set of tiles the path must not pass *through* — used for warp tiles (doors/stairs),
+    which teleport you, so A* must only ever *end* on one (the target), never route across
+    it. Unknown edges are treated as walkable (optimistic); the caller re-plans when a step
+    reveals a new wall. Bounded to a box around start/target so it stays cheap. Replaces
     the old greedy stepper that gave up the moment its first two choices were blocked.
     """
     import heapq
@@ -266,6 +274,8 @@ def astar(start: tuple[int, int], target: tuple[int, int], walls: set[str], pad:
             nx, ny = x + dx, y + dy
             if not (lo_x <= nx <= hi_x and lo_y <= ny <= hi_y) or nx < 0 or ny < 0:
                 continue
+            if (nx, ny) in avoid and (nx, ny) != (tx, ty):
+                continue  # warp tile — only ever step onto it if it's the destination
             ng = cost + 1
             if ng < g.get((nx, ny), 1 << 30):
                 g[(nx, ny)] = ng
@@ -588,6 +598,13 @@ class GymAgent(PokemonAgent):
         """
         status = self._status()
         before_map = status.get("map_id")
+        # Warp tiles to route around: stepping onto a door/stair teleports you, so A* must
+        # never path *through* one en route to an unreachable target (that's how the agent
+        # accidentally bounced upstairs while heading for a Pallet/Route coordinate).
+        warp_tiles = frozenset(
+            (e["x"], e["y"]) for e in (status.get("exits") or [])
+            if isinstance(e.get("x"), int) and isinstance(e.get("y"), int)
+        )
         for _ in range(40):  # total steps budget (incl. re-plans)
             status = self._status()
             if status.get("map_id") != before_map:
@@ -597,7 +614,7 @@ class GymAgent(PokemonAgent):
                 break
             if (x, y) == (tx, ty):
                 break
-            path = astar((x, y), (tx, ty), self._walls.get(before_map, set()))
+            path = astar((x, y), (tx, ty), self._walls.get(before_map, set()), avoid=warp_tiles)
             if not path:
                 break  # genuinely boxed in by known walls — let the LLM decide
             # Walk the planned path until a step fails (new wall) or the map changes,
