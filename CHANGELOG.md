@@ -35,11 +35,24 @@ Findings (with evidence) and fixes:
 - **Oak's-lab softlock recovery**: if the player is frozen on one tile in the Gen-1 lab
   (map 40) with a starter for ~6 turns, the agent jumps to the shared `post-starter`
   checkpoint (the documented skip past this known-hard scripted section).
-- Tests: `tests/test_gym_agent.py` — A\* (straight / around-a-wall / boxed-in) and the
-  A-only `take_starter` choreography.
+- **A\* must not path *through* warp tiles** (added `avoid` set): a first live run regressed
+  with the agent bouncing between floors because A\*, heading to an unreachable target,
+  stepped onto the stairs warp. It now routes around warp tiles and only ends on one when
+  it's the destination.
+- Tests: `tests/test_gym_agent.py` — A\* (straight / around-a-wall / boxed-in /
+  warp-avoidance) and the A-only `take_starter` choreography.
 
-_Live end-to-end re-verification of the Gen-1 lab pass-through was in progress at session
-end (see Next steps in the handoff)._
+### Verified (live)
+Before these fixes, every model capped at "Get a starter" / "Step outside" (sealed in the
+lab). After: a live `gpt-5-nano` run reached **4/12 milestones including "Reach Route 1"**
+in 90 turns ($0.027), with the lab softlock-skip firing — the first time any run got past
+Oak's lab. Remaining distance (Route 1 → Viridian → Pewter) is now bounded by model
+navigation quality rather than the harness wall.
+
+### Known remaining (not Gen-1 harness bugs)
+- Fire Red still needs its own `post-starter` checkpoint + lab softlock handling (the skip
+  is Gen-1/map-40 only), so FRLG runs still stall at the lab.
+- A\* plans over *learned* walls (optimistic); reading true RAM collision would be better.
 
 ## 2026-06-13 (Fire Red default + FRLG journey + replay sync)
 
