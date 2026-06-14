@@ -2,7 +2,35 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from harness.examples.gym_agent import GymAgent, parse_text_tool_call
+from harness.examples.gym_agent import GymAgent, astar, parse_text_tool_call
+
+
+def _walk(start, path):
+    delta = {"UP": (0, -1), "DOWN": (0, 1), "LEFT": (-1, 0), "RIGHT": (1, 0)}
+    x, y = start
+    for d in path:
+        dx, dy = delta[d]
+        x, y = x + dx, y + dy
+    return (x, y)
+
+
+def test_astar_straight_path() -> None:
+    path = astar((0, 0), (3, 0), set())
+    assert path is not None and _walk((0, 0), path) == (3, 0)
+    assert len(path) == 3
+
+
+def test_astar_routes_around_a_wall() -> None:
+    # A vertical wall segment blocking the direct line; A* must detour and still arrive.
+    walls = {"1,0,RIGHT", "1,1,RIGHT", "1,2,RIGHT"}
+    path = astar((1, 1), (3, 1), walls)
+    assert path is not None and _walk((1, 1), path) == (3, 1)
+    # greedy "always step toward target" would have stalled at the wall; A* succeeds.
+
+
+def test_astar_returns_none_when_boxed_in() -> None:
+    walls = {"5,5,UP", "5,5,DOWN", "5,5,LEFT", "5,5,RIGHT"}
+    assert astar((5, 5), (5, 8), walls) is None
 
 
 def make_agent() -> GymAgent:
@@ -82,10 +110,10 @@ def test_take_starter_stops_on_acquire_and_declines_nickname() -> None:
 
     assert result["acquired"] is True
     assert result["phantom_slot"] is False
-    # The macro must stop pressing A the instant the party gains a mon (after the
-    # 2nd A) — never a 3rd A inside the confirm loop that would open the naming
-    # screen. Then it declines the nickname with DOWN+A.
-    assert presses == ["UP", "A", "UP", "A", "A", "DOWN", "A", "A"]
+    # A-only: advance the pickup with A until the party gains the mon (2nd A), then a
+    # couple of trailing A. No UP/DOWN — those corrupted RED's rival cutscene.
+    assert presses == ["A", "A", "A", "A"]
+    assert "DOWN" not in presses and "UP" not in presses
 
 
 def test_take_starter_refuses_in_battle() -> None:

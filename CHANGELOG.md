@@ -1,5 +1,46 @@
 # Changelog
 
+## 2026-06-14 (failure-mode forensics + harness bug fixes)
+
+Deep trace analysis to separate **harness/agent bugs** from **model-capability** limits.
+Findings (with evidence) and fixes:
+
+### Diagnosis — why agents stalled (not the model's fault)
+- **Oak's Lab seal (Gen-1, the real wall).** nano got the starter, then spent 91 turns
+  pinned on one tile, 95/112 moves blocked. Frame was rendered fine (brightness 255),
+  position/exits in the observation were correct, and the LLM's reasoning was sound — so
+  it was **not** a screenshot, data, or model-understanding failure. Flood-fill proved the
+  exit was **physically unreachable** (39 reachable tiles, y≤6) whereas the clean
+  `post-starter` state reaches the exit (79 tiles, y=11). Root cause: the starter pickup
+  **corrupted the rival-battle cutscene**, sealing the player in the lab. The cutscene
+  locks the player with `wJoyIgnore` (which clears mid-sequence), leaving a frozen state
+  no lock flag reports — so the agent move-spammed and broke the script.
+- **Fire Red warp offset.** The mined `map.json` warp tiles are ~1 tile off from the live
+  SaveBlock1 coordinates (the agent stood next to the staircase, not on it) — confirmed by
+  stepping one tile over and warping.
+- **Greedy `goto`.** The pather stepped toward the target and gave up the moment its first
+  choices were walls — it couldn't route around furniture, which is how it got pinned.
+
+### Fixed
+- `harness/examples/gym_agent.py` — **A\* navigation**: `goto` now plans with A\* over the
+  learned wall map and re-plans when a step reveals a new wall, instead of greedy-give-up
+  (`astar()` is a pure, unit-tested helper).
+- **Exit-nudge**: on reaching a target exit without a map change, `goto` steps onto the
+  neighbouring tiles to trigger the warp — fixing the Fire Red ~1-tile warp offset and
+  flaky doors generally.
+- **`take_starter` rewritten to A-only**: it previously pressed UP/DOWN to "pin YES" and
+  "decline a nickname", but RED's starter has no nickname prompt and those presses fought
+  the rival cutscene and corrupted it. Now it just advances with A until the party gains
+  the mon, leaving the cutscene to autoplay.
+- **Oak's-lab softlock recovery**: if the player is frozen on one tile in the Gen-1 lab
+  (map 40) with a starter for ~6 turns, the agent jumps to the shared `post-starter`
+  checkpoint (the documented skip past this known-hard scripted section).
+- Tests: `tests/test_gym_agent.py` — A\* (straight / around-a-wall / boxed-in) and the
+  A-only `take_starter` choreography.
+
+_Live end-to-end re-verification of the Gen-1 lab pass-through was in progress at session
+end (see Next steps in the handoff)._
+
 ## 2026-06-13 (Fire Red default + FRLG journey + replay sync)
 
 ### Added

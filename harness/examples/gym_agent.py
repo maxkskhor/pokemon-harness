@@ -225,6 +225,55 @@ def parse_text_tool_call(content: str | None) -> tuple[str, dict[str, Any]] | No
     return None
 
 
+_DELTA = {"UP": (0, -1), "DOWN": (0, 1), "LEFT": (-1, 0), "RIGHT": (1, 0)}
+
+
+def astar(start: tuple[int, int], target: tuple[int, int], walls: set[str], pad: int = 8) -> list[str] | None:
+    """Shortest path of directions from start to target, routing around known walls.
+
+    `walls` holds directed blockers "x,y,DIR" (from a tile you can't step DIR). Unknown
+    edges are treated as walkable (optimistic) — the caller re-plans when a step reveals a
+    new wall. Search is bounded to a box around start/target so it stays cheap. Replaces
+    the old greedy stepper that gave up the moment its first two choices were blocked.
+    """
+    import heapq
+
+    sx, sy = start
+    tx, ty = target
+    lo_x, hi_x = min(sx, tx) - pad, max(sx, tx) + pad
+    lo_y, hi_y = min(sy, ty) - pad, max(sy, ty) + pad
+
+    def h(x: int, y: int) -> int:
+        return abs(x - tx) + abs(y - ty)
+
+    open_heap: list[tuple[int, int, tuple[int, int]]] = [(h(sx, sy), 0, (sx, sy))]
+    came: dict[tuple[int, int], tuple[tuple[int, int], str]] = {}
+    g: dict[tuple[int, int], int] = {(sx, sy): 0}
+    while open_heap:
+        _, cost, (x, y) = heapq.heappop(open_heap)
+        if (x, y) == (tx, ty):
+            path: list[str] = []
+            cur = (x, y)
+            while cur in came:
+                cur, d = came[cur]
+                path.append(d)
+            return list(reversed(path))
+        if cost > g.get((x, y), 1 << 30):
+            continue
+        for direction, (dx, dy) in _DELTA.items():
+            if f"{x},{y},{direction}" in walls:
+                continue
+            nx, ny = x + dx, y + dy
+            if not (lo_x <= nx <= hi_x and lo_y <= ny <= hi_y) or nx < 0 or ny < 0:
+                continue
+            ng = cost + 1
+            if ng < g.get((nx, ny), 1 << 30):
+                g[(nx, ny)] = ng
+                came[(nx, ny)] = ((x, y), direction)
+                heapq.heappush(open_heap, (ng + h(nx, ny), ng, (nx, ny)))
+    return None
+
+
 def _strip_image_urls(value: Any) -> Any:
     if isinstance(value, list):
         return [_strip_image_urls(item) for item in value]
@@ -268,6 +317,10 @@ class GymAgent(PokemonAgent):
         self._stall_turns = int(os.environ.get("POKEMON_STALL_TURNS", "0")) or None
         self._last_ms_count = 0
         self._stall_base_turn = 0
+        # Softlock recovery: track how long the player has been frozen on one tile, to
+        # escape the known-hard Oak's-lab rival cutscene via the post-starter checkpoint.
+        self._frozen_xy: tuple[Any, Any, Any] | None = None
+        self._frozen_turns = 0
         self._meta = MetaHarness(
             emit=self.emit,
             save_checkpoint=self.save_state,
@@ -524,53 +577,59 @@ class GymAgent(PokemonAgent):
         }
 
     def _tool_goto(self, tx: int, ty: int) -> dict[str, Any]:
-        """Greedy local navigation to (tx,ty) on the current map.
+        """A* navigation to (tx,ty) on the current map, routing around learned walls.
 
-        Prefers the axis with the larger remaining gap, consults the learned
-        wall map, sidesteps when the direct direction is blocked, and avoids
-        bouncing straight back to the previous tile. No collision data needed.
+        Plans a path with `astar` over the learned wall map, walks it, and re-plans
+        whenever a step reveals a new wall — instead of the old greedy stepper that gave
+        up as soon as its first couple of choices were blocked (which is how the agent got
+        pinned in Oak's lab). If the target is an exit and arriving there didn't change the
+        map, it nudges onto neighbouring tiles to trigger the warp — this also absorbs the
+        ~1-tile coordinate offset in the mined Fire Red warp tiles.
         """
         status = self._status()
         before_map = status.get("map_id")
-        sx, sy = self._position(status)
-        previous: tuple[Any, Any] | None = None
-        for _ in range(24):
+        for _ in range(40):  # total steps budget (incl. re-plans)
             status = self._status()
             if status.get("map_id") != before_map:
                 break
             x, y = self._position(status)
+            if not isinstance(x, int) or not isinstance(y, int):
+                break
             if (x, y) == (tx, ty):
                 break
-            dx, dy = tx - (x or 0), ty - (y or 0)
-            ordered: list[str] = []
-            x_dir = "RIGHT" if dx > 0 else "LEFT"
-            y_dir = "DOWN" if dy > 0 else "UP"
-            if abs(dy) >= abs(dx):
-                if dy: ordered.append(y_dir)
-                if dx: ordered.append(x_dir)
-            else:
-                if dx: ordered.append(x_dir)
-                if dy: ordered.append(y_dir)
-            # Sidestep candidates if both useful directions are walls.
-            for fallback in ("UP", "DOWN", "LEFT", "RIGHT"):
-                if fallback not in ordered:
-                    ordered.append(fallback)
-            stepped = False
-            for direction in ordered:
-                delta = {"UP": (0, -1), "DOWN": (0, 1), "LEFT": (-1, 0), "RIGHT": (1, 0)}[direction]
-                nxt = ((x or 0) + delta[0], (y or 0) + delta[1])
-                if nxt == previous and direction not in ordered[:1]:
-                    continue  # don't ping-pong unless it's the primary direction
-                if self._is_wall(before_map, x, y, direction):
-                    continue
+            path = astar((x, y), (tx, ty), self._walls.get(before_map, set()))
+            if not path:
+                break  # genuinely boxed in by known walls — let the LLM decide
+            # Walk the planned path until a step fails (new wall) or the map changes,
+            # then the outer loop re-plans from the new position.
+            progressed = False
+            for direction in path:
                 if self._single_step(direction, before_map):
-                    previous = (x, y)
-                    stepped = True
-                    break
-            if not stepped:
-                break  # boxed in (by current knowledge) — let the LLM decide
+                    progressed = True
+                    if self._status().get("map_id") != before_map:
+                        break
+                else:
+                    break  # hit an unknown wall; _single_step recorded it -> re-plan
+            if not progressed:
+                break
+
         after = self._status()
         ax, ay = self._position(after)
+        arrived = (ax, ay) == (tx, ty) and after.get("map_id") == before_map
+        # Exit-nudge: if we reached the target exit tile but didn't warp, the warp tile is
+        # within ~1 tile (Fire Red's mined coords are slightly offset) — step onto each
+        # neighbour to trigger it, returning to the spot between tries.
+        if arrived and after.get("map_id") == before_map and self._is_exit_near(after, tx, ty):
+            for direction in ("DOWN", "LEFT", "RIGHT", "UP"):
+                if self._single_step(direction, before_map):
+                    if self._status().get("map_id") != before_map:
+                        break  # warped!
+                    # moved but no warp — step back to keep trying from the exit tile
+                    opp = {"DOWN": "UP", "UP": "DOWN", "LEFT": "RIGHT", "RIGHT": "LEFT"}[direction]
+                    self._single_step(opp, before_map)
+            after = self._status()
+            ax, ay = self._position(after)
+
         return {
             "target": {"x": tx, "y": ty},
             "arrived": (ax, ay) == (tx, ty) and after.get("map_id") == before_map,
@@ -578,6 +637,13 @@ class GymAgent(PokemonAgent):
             "entered_new_map": after.get("map_id") != before_map,
             "in_battle": bool(after.get("battle")),
         }
+
+    def _is_exit_near(self, status: dict[str, Any], tx: int, ty: int) -> bool:
+        for e in status.get("exits") or []:
+            ex, ey = e.get("x"), e.get("y")
+            if isinstance(ex, int) and isinstance(ey, int) and abs(ex - tx) + abs(ey - ty) <= 1:
+                return True
+        return False
 
     def _record_wall(self, map_id: Any, x: Any, y: Any, direction: str) -> None:
         if not (isinstance(map_id, int) and isinstance(x, int) and isinstance(y, int)):
@@ -625,46 +691,35 @@ class GymAgent(PokemonAgent):
         return value if isinstance(value, int) else 0
 
     def _tool_take_starter(self) -> dict[str, Any]:
-        """Deterministically pick up the pokeball the player is FACING in Oak's lab.
+        """Pick up the pokeball the player is FACING in Oak's lab (advance with A only).
 
-        The flaky part for a cheap model is the two prompts: "Do you want X?" (answer
-        YES) and "Give a nickname?" (answer NO). Pressing A blindly through them either
-        picks NO on the first or opens the naming screen on the second, leaving a
-        phantom level-0 party slot. This macro:
-          1. Pins the cursor on YES and presses A to confirm, stopping the *instant*
-             wPartyCount increments — so it can never press A again into the nickname
-             box (the move that opens the keyboard).
-          2. Drives the nickname YES/NO to NO using the live menu cursor.
+        Pokemon Red's starter pickup is a plain "Do you want it?" YES/NO whose cursor
+        defaults to YES — so pressing A confirms it; there is NO nickname prompt (that's
+        Yellow). The previous macro pressed UP/DOWN to "pin YES" and "decline a nickname",
+        which on RED instead fought the immediately-following rival cutscene and left the
+        script half-run — sealing the player in the lab. So: just advance dialogue with A
+        until the party gains the mon, then a couple of trailing A. The rival cutscene that
+        follows is input-locked and handled by the agent's cutscene autoplay; if that
+        softlocks, run() recovers via the post-starter checkpoint.
         """
         if self._status().get("battle"):
             return {"error": "in battle — finish the fight before picking up a ball"}
         start_count = self._party_count()
 
         acquired = False
-        for _ in range(12):
+        for _ in range(16):
             if self._party_count() > start_count:
                 acquired = True
                 break
-            self.press("UP")  # pin YES (top option); a no-op on plain text boxes
-            self.sequence([{"type": "wait", "frames": 20}])
-            self.press("A")  # advance dialogue / confirm YES
-            self.sequence([{"type": "wait", "frames": 40}])
-        if not acquired and self._party_count() > start_count:
-            acquired = True
+            self.press("A")  # advance pickup dialogue / confirm the default YES
+            self.sequence([{"type": "wait", "frames": 50}])
 
         if acquired:
-            # Advance the "<NAME> received X!" line to surface the nickname YES/NO.
-            self.press("A")
-            self.sequence([{"type": "wait", "frames": 50}])
-            # Decline the nickname: move the cursor to NO (index 1) from its read
-            # state, then confirm. Mirrors battle_move's cursor-driven selection.
-            if self._menu_cursor() == 0:
-                self.press("DOWN")
-                self.sequence([{"type": "wait", "frames": 20}])
-            self.press("A")
-            self.sequence([{"type": "wait", "frames": 60}])
-            self.press("A")  # clear any trailing dialogue line
-            self.sequence([{"type": "wait", "frames": 40}])
+            # Advance the "<NAME> received X!" line; do NOT press any direction (that's
+            # what corrupted the rival cutscene). Leave the rest to cutscene autoplay.
+            for _ in range(2):
+                self.press("A")
+                self.sequence([{"type": "wait", "frames": 50}])
 
         status = self._status()
         party = status.get("party") or []
@@ -864,7 +919,41 @@ class GymAgent(PokemonAgent):
         self.emit("lifecycle", {"status": "circuit_breaker", "position": position})
         return True
 
+    def _recover_lab_softlock(self) -> bool:
+        """Escape the Oak's-lab rival-cutscene softlock via the clean post-starter state.
+
+        After taking the starter, Pokemon Red runs a rival cutscene that can leave the
+        player frozen in the lab with NO standard lock flag set (so cutscene autoplay
+        can't see it) — the player is sealed in and no move/A helps. When we've been
+        frozen on one tile in Oak's lab (map 40) with a starter for several turns, jump
+        to the shared `post-starter` checkpoint (the documented skip past this known-hard
+        scripted section). Gated to the Gen-1 lab so it never fires elsewhere.
+        """
+        state = self.state()
+        status = state.get("status") or {}
+        pokemon = state.get("pokemon") or {}
+        xy = (status.get("map_id"), pokemon.get("x"), pokemon.get("y"))
+        if xy == self._frozen_xy:
+            self._frozen_turns += 1
+        else:
+            self._frozen_xy = xy
+            self._frozen_turns = 0
+        has_starter = any((m.get("level") or 0) >= 1 for m in (status.get("party") or []))
+        if self._frozen_turns >= 6 and status.get("map_id") == 40 and has_starter:
+            try:
+                self.load_state("post-starter")
+                self._walls.pop(40, None)  # stale walls from the sealed state
+                self._frozen_turns = 0
+                self._frozen_xy = None
+                self.emit("lifecycle", {"status": "lab_softlock_skip", "via": "post-starter"})
+                return True
+            except Exception as exc:
+                self.emit("warning", {"message": f"lab softlock skip failed: {exc}"})
+        return False
+
     def _play_one_turn(self) -> None:
+        if self._recover_lab_softlock():
+            return  # recovered from the lab softlock; resume normally next turn
         self._autoplay_cutscene()
         # Let any in-flight overworld transition (a map-change fade, the tail of a
         # step animation) finish before we screenshot. Otherwise the agent pauses
