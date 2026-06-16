@@ -19,13 +19,16 @@ from env.pokefirered_names import (
     FIRERED_MAP_NAMES,
     FIRERED_MAP_WARPS,
 )
-from env.pokered_names import DEX_SPECIES_NAMES
+from env.pokered_names import DEX_SPECIES_NAMES, MOVE_NAMES
 from env.symbols import SymbolMap
 
 ReadByte = Callable[[int], int]
 
 PARTY_MON_SIZE = 100
+BATTLE_MON_SIZE = 0x58
 EWRAM_START, EWRAM_END = 0x02000000, 0x02040000
+BATTLE_TYPE_TRAINER = 1 << 3
+BATTLE_OUTCOME_NONE = 0
 
 # Position of the Growth substructure for personality % 24 (from GetSubstruct
 # in pret/pokefirered src/pokemon.c).
@@ -155,6 +158,7 @@ def read_game_status_gen3(symbols: SymbolMap, read_byte: ReadByte) -> dict[str, 
         out["badges"] = badges
 
     out["party"] = _read_party(symbols, read_byte)
+    out["battle"] = _read_battle(symbols, read_byte, out["party"])
     return out
 
 
@@ -190,3 +194,64 @@ def _read_party(symbols: SymbolMap, read_byte: ReadByte) -> list[dict[str, Any]]
             }
         )
     return party
+
+
+def _move_name(move_id: int) -> str:
+    return MOVE_NAMES.get(move_id, f"#{move_id}")
+
+
+def _battle_mon(read_byte: ReadByte, address: int) -> dict[str, Any]:
+    species_id = _u16(read_byte, address)
+    hp = _u16(read_byte, address + 0x28)
+    level = read_byte(address + 0x2A)
+    max_hp = _u16(read_byte, address + 0x2C)
+    moves = []
+    for index in range(4):
+        move_id = _u16(read_byte, address + 0x0C + index * 2)
+        pp = read_byte(address + 0x24 + index)
+        if move_id:
+            moves.append({"slot": index + 1, "name": _move_name(move_id), "pp": pp})
+    return {
+        "species": _species_name(species_id),
+        "level": level,
+        "hp": hp,
+        "max_hp": max_hp,
+        "moves": moves,
+        "status": _status_condition(_u32(read_byte, address + 0x4C)),
+    }
+
+
+def _read_battle(symbols: SymbolMap, read_byte: ReadByte, party: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
+    flags_addr = symbols.address("gBattleTypeFlags")
+    count_addr = symbols.address("gBattlersCount")
+    mons_addr = symbols.address("gBattleMons")
+    outcome_addr = symbols.address("gBattleOutcome")
+    if flags_addr is None or count_addr is None or mons_addr is None:
+        return None
+    flags = _u32(read_byte, flags_addr)
+    battlers = read_byte(count_addr)
+    if flags == 0 or battlers < 2:
+        return None
+    if outcome_addr is not None and read_byte(outcome_addr) != BATTLE_OUTCOME_NONE:
+        return None
+
+    mine = _battle_mon(read_byte, mons_addr)
+    enemy = _battle_mon(read_byte, mons_addr + BATTLE_MON_SIZE)
+    if mine["level"] == 0 or enemy["level"] == 0:
+        return None
+    # mGBA save states can preserve a defeated battle struct after the overworld has
+    # resumed (seen after the FRLG rival fight checkpoint). In a real active battle the
+    # battle mon HP and lead-party HP stay aligned; if the enemy is already defeated and
+    # these disagree, treat the battle struct as stale RAM, not current state.
+    if enemy["hp"] == 0 and party:
+        lead_hp = party[0].get("hp") if party else None
+        if isinstance(lead_hp, int) and lead_hp != mine["hp"]:
+            return None
+    return {
+        "kind": "trainer" if flags & BATTLE_TYPE_TRAINER else "wild",
+        "enemy_species": enemy["species"],
+        "enemy_level": enemy["level"],
+        "enemy_hp": enemy["hp"],
+        "enemy_max_hp": enemy["max_hp"],
+        "my": mine,
+    }

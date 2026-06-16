@@ -1,5 +1,54 @@
 # Changelog
 
+## 2026-06-15 (Fire Red leaderboard enablement)
+
+### Added
+- `scripts/setup.py` — Fire Red `post-starter` shared checkpoint generation for FRLG lab
+  recovery.
+- `harness/examples/gym_agent.py` — FRLG lab/post-starter automation, lab departure, and
+  Pallet-to-Route-1 handling so Fire Red runs can clear the starter sequence.
+- `env/gamestate_gen3.py` — Gen 3 battle-state observation, including battle type,
+  enemy HP/level/species, player HP, moves, and stale/resolved battle filtering.
+- `docs/bench/fire-red-post-analysis.md` — post-analysis for the Fire Red leaderboard.
+- `bench-results-fire-red.json` / `bench-results-fire-red.md` — Fire Red leaderboard
+  results from the valid run traces.
+
+### Changed
+- `README.md`, `docs/bench/README.md`, and `TODO.md` — refreshed project framing for a
+  portfolio/CV audience: the next step is generic map/collision planning and provider
+  robustness, not model-specific prompt overfitting.
+- `docs/assets/demo-page.png` and `docs/assets/demo-page-2.png` — refreshed screenshots
+  from the current Fire Red Watch/Runs UI.
+- `harness/examples/gym_agent.py` — system prompt is now ROM-neutral instead of saying
+  every run is Pokemon Red.
+- `harness/examples/gym_agent.py` — battle tools now flush battle-end text, `run_away()`
+  retries failed flee attempts, overworld movement refuses to run while in battle, and
+  learned-wall recording ignores battle-menu input.
+- `harness/meta.py` — Fire Red Route 1/Viridian prompts now prefer fleeing wild battles
+  and give explicit Route 1 waypoints.
+- `scripts/bench.py` — live benchmark rows now hard-stop backend env sessions between
+  models, pin `POKEMON_ESCALATION_MODEL` to the measured row model, and treat disappeared
+  or fast-error harness records as completed rows instead of hanging.
+- `harness/llm.py` — OpenAI-compatible providers now use an explicit request timeout via
+  `POKEMON_LLM_TIMEOUT_S` (default 60 seconds).
+- `ui/pokemon-harness-smoke.spec.js`, `ui/src/App.tsx`, and
+  `ui/src/checkpoints/ReplayBar.tsx` — aligned the smoke test and lint-sensitive state
+  updates with the current tabbed UI.
+
+### Fixed
+- Fire Red starter/lab runs no longer stall in Oak's lab before the leaderboard can test
+  Route 1 navigation.
+- Wild battles no longer poison Route 1 A* wall memory with fake blocked moves.
+- Live benchmark runs no longer silently resume a stale backend env session from a prior
+  row.
+
+### Verified
+- Focused suites: `uv run pytest tests/test_bench.py tests/test_llm_client.py
+  tests/test_gym_agent.py tests/test_gamestate_gen3.py tests/test_meta.py` (53 passed).
+- Fire Red leaderboard: `gpt-5-nano` and `gemini-2.5-flash-lite` reached 4/12 milestones
+  (Route 1); `qwen/qwen3.5-flash-02-23` and `gpt-5-mini` were blocked by OpenRouter 401
+  before gameplay.
+
 ## 2026-06-14 (failure-mode forensics + harness bug fixes)
 
 Deep trace analysis to separate **harness/agent bugs** from **model-capability** limits.

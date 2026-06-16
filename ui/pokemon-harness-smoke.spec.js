@@ -12,8 +12,11 @@ test("pokemon harness UI loads and shows connection status", async ({ page }) =>
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("http://127.0.0.1:5173/", { waitUntil: "domcontentloaded" });
 
-  await expect(page.getByRole("heading", { name: "Pokemon Harness" })).toBeVisible();
-  await expect(page.getByText("WebSocket")).toBeVisible();
+  await expect(page.getByText("Pokémon Harness")).toBeVisible();
+  await expect(page.getByText("connected")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Watch" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Inspect" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Runs" })).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -34,14 +37,14 @@ test("pokemon harness UI shows game screen when run is active", async ({ page })
     });
 
     await page.goto("http://127.0.0.1:5173/", { waitUntil: "domcontentloaded" });
-    await expect(page.locator("img.game-screen")).toBeVisible({ timeout: 5000 });
+    await expect(page.locator("img.watch-screen")).toBeVisible({ timeout: 5000 });
 
-    const screenBox = await page.locator(".screen-wrap").boundingBox();
+    const screenBox = await page.locator(".watch-screen").boundingBox();
     expect(screenBox).not.toBeNull();
-    expect(screenBox.width).toBeGreaterThan(500);
-    expect(screenBox.height).toBeGreaterThan(500);
+    expect(screenBox.width).toBeGreaterThan(400);
+    expect(screenBox.height).toBeGreaterThan(300);
 
-    await expect(page.locator(".metric-strip")).toContainText("Frame");
+    await expect(page.locator(".watch-stats")).toContainText("Turn");
     expect(errors).toEqual([]);
   } finally {
     await page.request.post("http://127.0.0.1:8000/api/run/stop").catch(() => {});
@@ -58,6 +61,7 @@ test("trace filter checkboxes toggle correctly including screenshots", async ({ 
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("http://127.0.0.1:5173/", { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "Inspect" }).click();
 
   // All filter labels should be visible
   await expect(page.getByLabel("Trace event filters")).toBeVisible();
@@ -75,13 +79,13 @@ test("trace filter checkboxes toggle correctly including screenshots", async ({ 
   expect(errors).toEqual([]);
 });
 
-test("metric strip shows Frame and Spend", async ({ page }) => {
+test("watch stats show Turn and Spend", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("http://127.0.0.1:5173/", { waitUntil: "domcontentloaded" });
 
-  const strip = page.locator(".metric-strip");
+  const strip = page.locator(".watch-stats");
   await expect(strip).toBeVisible();
-  for (const label of ["Frame", "Spend"]) {
+  for (const label of ["Turn", "Spend"]) {
     await expect(strip.getByText(label, { exact: true })).toBeVisible();
   }
 });
@@ -96,13 +100,14 @@ test("agent panel lists agents.yaml definitions with run controls", async ({ pag
   await expect(page.locator(".agent-run-controls button.primary")).toBeVisible();
 });
 
-test("paused speed button tooltip explains it does not stop the agent", async ({ page }) => {
+test("watch speed controls are visible", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("http://127.0.0.1:5173/", { waitUntil: "domcontentloaded" });
 
-  const tooltip = await page.getByRole("button", { name: /paused/ }).getAttribute("title");
-  expect(tooltip).toBeTruthy();
-  expect(tooltip.toLowerCase()).toContain("agent");
+  await expect(page.getByRole("button", { name: /paused/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "1x" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "5x" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "max" })).toBeVisible();
 });
 
 test("screenshots toggle actually hides trace thumbnails when a run is active", async ({ page }) => {
@@ -115,7 +120,8 @@ test("screenshots toggle actually hides trace thumbnails when a run is active", 
     await page.request.post("http://127.0.0.1:8000/api/action/press", { data: { button: "A", frames: 8 } });
 
     await page.goto("http://127.0.0.1:5173/", { waitUntil: "domcontentloaded" });
-    await expect(page.locator("img.game-screen")).toBeVisible({ timeout: 5000 });
+    await expect(page.locator("img.watch-screen")).toBeVisible({ timeout: 5000 });
+    await page.getByRole("button", { name: "Inspect" }).click();
 
     // Wait for at least one thumbnail to appear in the trace
     await expect(page.locator(".trace-thumbnail")).toBeVisible({ timeout: 5000 });
@@ -135,7 +141,7 @@ test("screenshots toggle actually hides trace thumbnails when a run is active", 
   }
 });
 
-test("emulator speed controls are labeled and functional without start-run button", async ({ page }) => {
+test("emulator speed controls are present without start-run button", async ({ page }) => {
   const errors = [];
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(message.text());
@@ -144,10 +150,10 @@ test("emulator speed controls are labeled and functional without start-run butto
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("http://127.0.0.1:5173/", { waitUntil: "domcontentloaded" });
 
-  // Speed controls and label should be present
-  await expect(page.getByText("Emulator speed")).toBeVisible();
   await expect(page.getByRole("button", { name: /paused/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "1x" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "5x" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "max" })).toBeVisible();
 
   // No "Reset run" or "Start run" button in the header
   await expect(page.getByRole("button", { name: "Reset run" })).not.toBeVisible();

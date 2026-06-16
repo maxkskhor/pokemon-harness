@@ -144,6 +144,43 @@ def _api(base_url: str, method: str, path: str, body: dict | None = None) -> Any
         return resp.json() if resp.content else None
 
 
+def _stop_active_run(base_url: str, *, timeout_s: float = 10.0) -> None:
+    """Best-effort hard boundary between benchmark models.
+
+    Stopping through the harness control FIFO is not enough for live benchmarks:
+    the runner may terminate the agent process before it drains the stop command,
+    leaving the backend env session alive for the next model to resume. Stop the
+    env directly and wait until /api/state no longer exposes an active session.
+    """
+    try:
+        _api(base_url, "POST", "/api/run/stop")
+    except Exception:
+        pass
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            state = _api(base_url, "GET", "/api/state")
+        except Exception:
+            return
+        if not (isinstance(state, dict) and state.get("run_id")):
+            return
+        time.sleep(0.25)
+
+
+def _model_env(model: str, *, max_turns: int, budget: float, stall_turns: int) -> dict[str, str]:
+    return {
+        **os.environ,
+        "POKEMON_AGENT_MODEL": model,
+        # Benchmark rows should measure the requested model, not the meta-harness
+        # default escalation fallback.
+        "POKEMON_ESCALATION_MODEL": model,
+        "POKEMON_MAX_TURNS": str(max_turns),
+        "POKEMON_BUDGET_USD": str(budget),
+        "POKEMON_STALL_TURNS": str(stall_turns),
+    }
+
+
 def run_model_live(
     model: str,
     *,
@@ -160,13 +197,11 @@ def run_model_live(
     Mirrors how the UI launcher works: the agent registers over HTTP, we send Play,
     then poll until it returns to idle (turn cap, budget, journey complete, or error).
     """
-    env = {
-        **os.environ,
-        "POKEMON_AGENT_MODEL": model,
-        "POKEMON_MAX_TURNS": str(max_turns),
-        "POKEMON_BUDGET_USD": str(budget),
-        "POKEMON_STALL_TURNS": str(stall_turns),
-    }
+    env = _model_env(model, max_turns=max_turns, budget=budget, stall_turns=stall_turns)
+    # A live benchmark must start a fresh env run. If the backend still has a
+    # session from a prior manual/aborted run, PokemonAgent would otherwise
+    # resume it instead of loading the requested start state.
+    _stop_active_run(base_url)
     before = {h["id"] for h in _api(base_url, "GET", "/api/harness/list")}
     proc = subprocess.Popen(
         [sys.executable, "-m", "harness.examples.gym_agent"],
@@ -186,7 +221,7 @@ def run_model_live(
             _api(base_url, "POST", f"/api/harness/{harness_id}/stop")
         except Exception:
             pass
-        time.sleep(1.0)
+        _stop_active_run(base_url)
     finally:
         proc.terminate()
         try:
@@ -227,7 +262,9 @@ def _await_run_and_finish(base_url: str, harness_id: str, deadline: float) -> st
         status = (record or {}).get("status")
         if status == "running":
             saw_running = True
-        elif saw_running and status in ("idle", "error"):
+        elif saw_running and record is None:
+            return run_id
+        elif (saw_running or run_id) and status in ("idle", "error"):
             return run_id
         time.sleep(1.0)
     return run_id

@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from harness.examples.gym_agent import GymAgent, astar, parse_text_tool_call
+from harness.meta import FRLG_MILESTONES
 
 
 def _walk(start, path):
@@ -92,6 +93,29 @@ def test_input_locked_reads_status_flags5_bit6() -> None:
         assert agent._input_locked() is True
 
 
+def test_record_wall_ignores_battle_state() -> None:
+    agent = make_agent()
+    with patch.object(agent, "_input_locked", return_value=False), \
+         patch.object(agent, "_status", return_value={"battle": {"kind": "wild"}}):
+        agent._record_wall(787, 12, 36, "LEFT")
+
+    assert agent._walls == {}
+
+
+def test_goto_refuses_to_move_while_in_battle() -> None:
+    agent = make_agent()
+    battle_status = {"map_id": 787, "map_name": "Route 1", "battle": {"kind": "wild"}}
+    with patch.object(agent, "_status", return_value=battle_status), \
+         patch.object(agent, "state", return_value={"pokemon": {"x": 12, "y": 36}}), \
+         patch.object(agent, "_single_step") as single_step:
+        result = agent._tool_goto(8, 27)
+
+    assert result["in_battle"] is True
+    assert "error" in result
+    assert result["position"] == {"x": 12, "y": 36, "map": 787, "map_name": "Route 1"}
+    single_step.assert_not_called()
+
+
 def test_loop_detection_after_eight_close_positions() -> None:
     agent = make_agent()
     looping = False
@@ -143,6 +167,177 @@ def test_take_starter_refuses_in_battle() -> None:
     with patch.object(agent, "state", return_value={"status": {"battle": {"kind": "wild"}}, "pokemon": {}}):
         result = agent._tool_take_starter()
     assert "error" in result
+
+
+def test_lab_softlock_skip_uses_gen1_post_starter_state() -> None:
+    agent = make_agent()
+    agent._frozen_xy = (40, 5, 3)
+    agent._frozen_turns = 6
+    state = {
+        "pokemon": {"x": 5, "y": 3},
+        "status": {
+            "map_id": 40,
+            "party": [{"nickname": "SQUIRTLE", "level": 5}],
+        },
+    }
+    with patch.object(agent, "state", return_value=state), \
+         patch.object(agent, "load_state") as load_state, \
+         patch.object(agent, "emit"):
+        assert agent._recover_lab_softlock() is True
+
+    load_state.assert_called_once_with("post-starter")
+
+
+def test_lab_softlock_skip_uses_frlg_post_starter_state() -> None:
+    agent = make_agent()
+    agent._frozen_xy = (1027, 8, 5)
+    agent._frozen_turns = 6
+    state = {
+        "pokemon": {"x": 8, "y": 5},
+        "status": {
+            "map_id": 1027,
+            "party": [{"nickname": "SQUIRTLE", "level": 5}],
+        },
+    }
+    with patch.object(agent, "state", return_value=state), \
+         patch.object(agent, "load_state") as load_state, \
+         patch.object(agent, "emit"):
+        assert agent._recover_lab_softlock() is True
+
+    load_state.assert_called_once_with("post-starter-pokefirered")
+
+
+def test_frlg_oak_scene_autoplay_advances_from_north_pallet() -> None:
+    agent = make_agent()
+    states = [
+        {"pokemon": {"x": 12, "y": 1}, "status": {"map_id": 768, "party": []}},
+        {"pokemon": {"x": 12, "y": 1}, "status": {"map_id": 768, "party": []}},
+        {"pokemon": {"x": 6, "y": 4}, "status": {"map_id": 1027, "party": []}},
+    ]
+    with patch.object(agent, "state", side_effect=states), \
+         patch.object(agent, "press") as press, \
+         patch.object(agent, "sequence"), \
+         patch.object(agent, "load_state") as load_state, \
+         patch.object(agent, "emit") as emit:
+        assert agent._advance_frlg_oak_scene() is True
+
+    assert press.call_count == 2
+    load_state.assert_called_once_with("post-starter-pokefirered")
+    emit.assert_called_once()
+    assert emit.call_args.args[0] == "lifecycle"
+    assert emit.call_args.args[1]["status"] == "frlg_oak_scene_autoplay"
+
+
+def test_frlg_oak_scene_autoplay_ignores_other_positions() -> None:
+    agent = make_agent()
+    state = {"pokemon": {"x": 6, "y": 8}, "status": {"map_id": 768, "party": []}}
+    with patch.object(agent, "state", return_value=state), \
+         patch.object(agent, "press") as press:
+        assert agent._advance_frlg_oak_scene() is False
+    press.assert_not_called()
+
+
+def test_frlg_step_off_pallet_door_moves_down_from_player_house_warp() -> None:
+    agent = make_agent()
+    state = {"pokemon": {"x": 6, "y": 7}, "status": {"map_id": 768, "party": []}}
+    with patch.object(agent, "state", return_value=state), \
+         patch.object(agent, "press") as press, \
+         patch.object(agent, "sequence") as sequence, \
+         patch.object(agent, "emit") as emit:
+        assert agent._step_off_frlg_pallet_door() is True
+
+    press.assert_called_once_with("RIGHT")
+    sequence.assert_called_once()
+    emit.assert_called_once()
+    assert emit.call_args.args[1]["status"] == "frlg_step_off_pallet_door"
+
+
+def test_frlg_lab_departure_clears_rival_scene_for_route_1() -> None:
+    agent = make_agent()
+    agent._meta.milestones = FRLG_MILESTONES
+    agent._meta.state.reached = ["leave-bedroom", "exit-house", "get-starter"]
+    status = {"map_id": 1027, "party": [{"species": "Squirtle", "level": 5}]}
+    single_steps = 0
+
+    def fake_single_step(direction: str, before_map: int) -> bool:
+        nonlocal single_steps
+        assert direction == "DOWN"
+        single_steps += 1
+        if single_steps == 3:
+            status["map_id"] = 768
+        return True
+
+    with patch.object(agent, "_status", side_effect=lambda: status), \
+         patch.object(agent, "_tool_goto") as goto, \
+         patch.object(agent, "press") as press, \
+         patch.object(agent, "sequence"), \
+         patch.object(agent, "_single_step", side_effect=fake_single_step), \
+         patch.object(agent, "emit") as emit:
+        assert agent._finish_frlg_lab_departure() is True
+
+    goto.assert_called_once_with(6, 12)
+    assert press.call_count == 120
+    assert single_steps == 3
+    emit.assert_called_once()
+    assert emit.call_args.args[1]["status"] == "frlg_lab_departure"
+
+
+def test_frlg_lab_departure_does_not_fire_for_parcel_visit() -> None:
+    agent = make_agent()
+    agent._meta.milestones = FRLG_MILESTONES
+    agent._meta.state.reached = [
+        "leave-bedroom",
+        "exit-house",
+        "get-starter",
+        "route-1",
+        "viridian-city",
+    ]
+    status = {"map_id": 1027, "party": [{"species": "Squirtle", "level": 6}]}
+    with patch.object(agent, "_status", return_value=status), \
+         patch.object(agent, "_tool_goto") as goto:
+        assert agent._finish_frlg_lab_departure() is False
+    goto.assert_not_called()
+
+
+def test_frlg_route1_entry_clears_sign_lady_trigger() -> None:
+    agent = make_agent()
+    agent._meta.milestones = FRLG_MILESTONES
+    agent._meta.state.reached = ["leave-bedroom", "exit-house", "get-starter"]
+    status = {"map_id": 768, "party": [{"species": "Squirtle", "level": 6}]}
+    single_steps = 0
+
+    def fake_single_step(direction: str, before_map: int) -> bool:
+        nonlocal single_steps
+        assert direction == "UP"
+        single_steps += 1
+        if single_steps == 3:
+            status["map_id"] = 787
+        return True
+
+    with patch.object(agent, "_status", side_effect=lambda: status), \
+         patch.object(agent, "_tool_goto") as goto, \
+         patch.object(agent, "press") as press, \
+         patch.object(agent, "sequence"), \
+         patch.object(agent, "_single_step", side_effect=fake_single_step), \
+         patch.object(agent, "emit") as emit:
+        assert agent._enter_frlg_route1_from_pallet() is True
+
+    goto.assert_called_once_with(12, 1)
+    assert press.call_count == 20
+    assert single_steps == 3
+    emit.assert_called_once()
+    assert emit.call_args.args[1]["status"] == "frlg_route1_entry"
+
+
+def test_frlg_route1_entry_waits_until_route1_milestone() -> None:
+    agent = make_agent()
+    agent._meta.milestones = FRLG_MILESTONES
+    agent._meta.state.reached = ["leave-bedroom", "exit-house"]
+    status = {"map_id": 768, "party": [{"species": "Squirtle", "level": 6}]}
+    with patch.object(agent, "_status", return_value=status), \
+         patch.object(agent, "_tool_goto") as goto:
+        assert agent._enter_frlg_route1_from_pallet() is False
+    goto.assert_not_called()
 
 
 def test_world_memory_round_trips_through_checkpoint() -> None:

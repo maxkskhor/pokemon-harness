@@ -166,33 +166,44 @@ MILESTONES: list[Milestone] = [
 FRLG_MILESTONES: list[Milestone] = [
     Milestone(
         "leave-bedroom", "Leave the bedroom",
-        "You start in your bedroom upstairs. Walk to the staircase (warp tile) and go "
-        "DOWN to the ground floor of your house.",
+        "You start in your bedroom upstairs. The staircase exit is exactly at (10,2). "
+        "Call goto(10,2) to step onto it; if you arrive but the map does not change, "
+        "move DOWN once to trigger the stairs.",
         lambda s, done: _map_id(s) == 1024,
     ),
     Milestone(
         "exit-house", "Step outside",
-        "You are on the ground floor. Walk DOWN to the door at the bottom and step outside "
-        "into Pallet Town.",
+        "You are on the ground floor. The front door is at the bottom; use goto(4,8) "
+        "or goto(5,8), then move DOWN once to step outside into Pallet Town.",
         lambda s, done: _map_id(s) == 768,
     ),
     Milestone(
         "get-starter", "Get a starter Pokemon",
-        "Leave Pallet Town by the gap in the trees at the TOP and walk UP — Professor Oak "
-        "will stop you and bring you into his lab. Walk up to the table with the pokeballs, "
-        "face the middle one and call take_starter() (Squirtle is strong vs the first gym). "
-        "A rival battle follows — fight with battle_move(1); win or lose, the story goes on.",
+        "If you are inside a house, leave it first: use the listed EXITS at the bottom "
+        "(in your house, goto(4,8) or goto(5,8), then move DOWN). Once outside in Pallet "
+        "Town, go to the north approach at (12,1), then press A through Professor Oak's "
+        "scene until you are in his lab. In the lab, Squirtle is selected from the middle "
+        "pokeball by standing at (9,5) and calling take_starter(). If a rival battle "
+        "follows, fight with battle_move(1); win or lose, the story goes on.",
         lambda s, done: _has_real_pokemon(s),
     ),
     Milestone(
         "route-1", "Reach Route 1",
-        "Leave Oak's lab (door at the bottom), go to Pallet Town's north exit and walk UP "
-        "onto Route 1. Fight wild Pokemon with battle_move(1) for experience.",
+        "If you are inside Oak's lab (map 1027), leave through the bottom door: goto(6,12) "
+        "or goto(7,12), then move DOWN once. If you are already outside in Pallet Town "
+        "(map 768), do NOT go back to the lab or house exits. Go straight to the north "
+        "approach with goto(12,1) or goto(13,1), pressing A if a town NPC text box opens, "
+        "then keep moving UP onto Route 1. If a wild Pokemon appears, prefer run_away(); "
+        "if escape fails, call run_away() again or use battle_move(1).",
         lambda s, done: _map_id(s) == 787,
     ),
     Milestone(
         "viridian-city", "Reach Viridian City",
-        "Walk north through Route 1 until you enter Viridian City.",
+        "Route 1 is S-shaped with north-blocking ledges. Use these waypoints in order: "
+        "from the south entrance goto(13,32), then goto(8,27), then goto(13,27), then "
+        "goto(13,21), then continue around the next ledges toward the top edge and move "
+        "UP into Viridian City. If a wild Pokemon interrupts a waypoint, use run_away() "
+        "until escaped, then call the same waypoint again.",
         lambda s, done: _map_id(s) == 769,
     ),
     Milestone(

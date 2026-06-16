@@ -1,0 +1,42 @@
+[
+  {
+    "model": "openai/gpt-5-nano",
+    "run_id": "agent-4151590b",
+    "milestones_reached": 4,
+    "milestones_total": 12,
+    "furthest": "Reach Route 1",
+    "turns": 111,
+    "cost_usd": 0.0172,
+    "status": "stopped"
+  },
+  {
+    "model": "google/gemini-2.5-flash-lite",
+    "run_id": "agent-42240017",
+    "milestones_reached": 4,
+    "milestones_total": 12,
+    "furthest": "Reach Route 1",
+    "turns": 72,
+    "cost_usd": 0.0457,
+    "status": "stopped"
+  },
+  {
+    "model": "qwen/qwen3.5-flash-02-23",
+    "run_id": "agent-1468d1e0",
+    "milestones_reached": 0,
+    "milestones_total": 12,
+    "furthest": "\u2014",
+    "turns": 1,
+    "cost_usd": 0.0,
+    "status": "stopped"
+  },
+  {
+    "model": "openai/gpt-5-mini",
+    "run_id": "agent-35599acc",
+    "milestones_reached": 0,
+    "milestones_total": 12,
+    "furthest": "\u2014",
+    "turns": 1,
+    "cost_usd": 0.0,
+    "status": "stopped"
+  }
+]

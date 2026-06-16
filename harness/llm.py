@@ -143,6 +143,7 @@ class OpenAIChatProvider:
         default_model: str,
         api_key: str,
         base_url: str | None = None,
+        timeout_s: float | None = None,
         client: Any | None = None,
     ) -> None:
         self.name = name
@@ -153,17 +154,21 @@ class OpenAIChatProvider:
             kwargs: dict[str, Any] = {"api_key": api_key}
             if base_url:
                 kwargs["base_url"] = base_url
+            if timeout_s is not None:
+                kwargs["timeout"] = timeout_s
             self._client = openai.OpenAI(**kwargs)
 
     @classmethod
     def from_env(cls, config: LLMProviderConfig) -> OpenAIChatProvider:
         import os
 
+        timeout_s = float(os.environ.get("POKEMON_LLM_TIMEOUT_S", "60"))
         return cls(
             name=config.name,
             default_model=config.default_model,
             api_key=os.environ[config.api_key_env],
             base_url=config.base_url,
+            timeout_s=timeout_s,
         )
 
     def complete(self, *, model: str, messages: list[dict[str, Any]], **kwargs: Any) -> Any:

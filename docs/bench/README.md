@@ -27,7 +27,28 @@ uv run python scripts/bench.py run \
 uv run python scripts/bench.py score runs/<run-a> runs/<run-b>
 ```
 
-## Leaderboard
+## Latest Fire Red leaderboard
+
+Run on 2026-06-15 against `pokefirered.gba`, capped at 150 turns / $0.70 with
+stall-abort after 100 turns without a new milestone. Raw rows are in
+`../../bench-results-fire-red.json`; rendered table in `../../bench-results-fire-red.md`;
+analysis in `fire-red-post-analysis.md`.
+
+| Rank | Model | Milestones | Furthest reached | Turns | Cost (USD) | Notes |
+|---|---|---|---|---|---|---|
+| 1 | `openai/gpt-5-nano` | 4/12 | Reach Route 1 | 111 | $0.0172 | Stalled on Route 1 → Viridian planning |
+| 2 | `google/gemini-2.5-flash-lite` | 4/12 | Reach Route 1 | 72 | $0.0457 | Stalled on Route 1, then provider 401 |
+| 3 | `qwen/qwen3.5-flash-02-23` | 0/12 | - | 1 | $0.0000 | Provider 401 before gameplay |
+| 4 | `openai/gpt-5-mini` | 0/12 | - | 1 | $0.0000 | Provider 401 before gameplay |
+
+### Current finding
+
+The Fire Red harness path now clears the early scripted game sections: bedroom, Pallet,
+Oak's lab, starter, and Route 1. The next framework problem is generic route planning with
+real collision/map topology and interruption recovery, not prompt-tuning around one
+particular baseline model.
+
+## Gen-1 smoke-test leaderboard
 
 Run on 2026-06-13: 5 models, each from the `bedroom` start state, capped at 150 turns /
 $0.70, with stall-abort after 100 turns without a new milestone. Raw rows in
@@ -43,16 +64,15 @@ $0.70, with stall-abort after 100 turns without a new milestone. Raw rows in
 
 Total spend for the five final runs: ≈ $0.58.
 
-### Findings
+### Findings from that run
 
 - **The three cheapest models got furthest.** `gpt-5-nano`, `qwen3.5-flash`, and
   `gemini-2.5-flash-lite` each obtained the starter Pokémon; `gpt-5-mini` and the much
   pricier `claude-haiku-4.5` both stalled a step earlier, in Pallet Town. `claude-haiku`
   spent ~9× the cost of the leaders to go *less* far.
-- **Route 1 was the wall for everyone.** No model navigated Pallet Town's north exit onto
-  Route 1 within the cap — every run that reached the starter then rolled back and
-  stall-aborted. That's the next milestone to make tractable (clearer exit-coordinate
-  prompting, or a `goto`-the-map-edge macro).
+- **The run exposed harness bugs, not just model limits.** Subsequent forensics found and
+  fixed starter/lab/cutscene and pathing issues; the Fire Red leaderboard above is the
+  current baseline.
 - **Caveat: n = 1 per model.** These are single runs, so the ordering is noisy — treat it
   as a smoke test of "can this model make early progress cheaply", not a definitive
   ranking. Re-run with several seeds per model for a real comparison.

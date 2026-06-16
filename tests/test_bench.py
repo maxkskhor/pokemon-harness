@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from unittest.mock import patch
 from pathlib import Path
 
 # scripts/ is not a package — load bench.py directly from its file path.
@@ -71,3 +72,76 @@ def test_leaderboard_ranks_by_milestones_then_cost() -> None:
     assert "`furthest`" in lines[0]
     assert "`cheap-but-stuck`" in lines[1]
     assert "`tie-pricey`" in lines[2]
+
+
+def test_stop_active_run_waits_until_state_is_gone() -> None:
+    calls: list[tuple[str, str]] = []
+    states = iter([
+        {"run_id": "agent-old"},
+        {"run_id": "agent-old"},
+        RuntimeError("no active session"),
+    ])
+
+    def fake_api(_base_url: str, method: str, path: str, body: dict | None = None):
+        calls.append((method, path))
+        if path == "/api/state":
+            state = next(states)
+            if isinstance(state, Exception):
+                raise state
+            return state
+        return {}
+
+    with patch.object(bench, "_api", side_effect=fake_api), \
+         patch.object(bench.time, "sleep"):
+        bench._stop_active_run("http://test", timeout_s=5.0)
+
+    assert calls == [
+        ("POST", "/api/run/stop"),
+        ("GET", "/api/state"),
+        ("GET", "/api/state"),
+        ("GET", "/api/state"),
+    ]
+
+
+def test_model_env_disables_cross_model_escalation() -> None:
+    env = bench._model_env("provider/model-a", max_turns=150, budget=0.7, stall_turns=100)
+
+    assert env["POKEMON_AGENT_MODEL"] == "provider/model-a"
+    assert env["POKEMON_ESCALATION_MODEL"] == "provider/model-a"
+    assert env["POKEMON_MAX_TURNS"] == "150"
+    assert env["POKEMON_BUDGET_USD"] == "0.7"
+    assert env["POKEMON_STALL_TURNS"] == "100"
+
+
+def test_await_run_and_finish_returns_run_id_when_harness_disappears() -> None:
+    responses = iter([
+        {"run_id": "agent-ended"},
+        [{"id": "h1", "status": "running"}],
+        {"run_id": "agent-ended"},
+        [],
+    ])
+
+    def fake_api(_base_url: str, _method: str, _path: str, _body: dict | None = None):
+        return next(responses)
+
+    with patch.object(bench, "_api", side_effect=fake_api), \
+         patch.object(bench.time, "sleep"):
+        run_id = bench._await_run_and_finish("http://test", "h1", deadline=bench.time.monotonic() + 5)
+
+    assert run_id == "agent-ended"
+
+
+def test_await_run_and_finish_returns_run_id_for_fast_error() -> None:
+    responses = iter([
+        {"run_id": "agent-error"},
+        [{"id": "h1", "status": "idle", "error": "provider failed"}],
+    ])
+
+    def fake_api(_base_url: str, _method: str, _path: str, _body: dict | None = None):
+        return next(responses)
+
+    with patch.object(bench, "_api", side_effect=fake_api), \
+         patch.object(bench.time, "sleep"):
+        run_id = bench._await_run_and_finish("http://test", "h1", deadline=bench.time.monotonic() + 5)
+
+    assert run_id == "agent-error"

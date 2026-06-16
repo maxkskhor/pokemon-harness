@@ -48,12 +48,16 @@ export function ReplayBar({
   const [playing, setPlaying] = useState(false);
   const playingRef = useRef(false);
   const frameRef = useRef<number | null>(null);
-  frameRef.current = previewFrame;
+
+  useEffect(() => {
+    frameRef.current = previewFrame;
+  }, [previewFrame]);
 
   // Stop playback when the run changes or frames reset.
   useEffect(() => {
-    setPlaying(false);
+    const timer = window.setTimeout(() => setPlaying(false), 0);
     playingRef.current = false;
+    return () => window.clearTimeout(timer);
   }, [runId]);
 
   useEffect(() => {

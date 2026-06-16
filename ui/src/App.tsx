@@ -239,7 +239,8 @@ export function App() {
     if (!activeAgentName) return;
     const matching = harnessAgents.find((h) => h.name === activeAgentName);
     if (matching && matching.id !== selectedHarnessId) {
-      setSelectedHarnessId(matching.id);
+      const timer = window.setTimeout(() => setSelectedHarnessId(matching.id), 0);
+      return () => window.clearTimeout(timer);
     }
   }, [state, harnessAgents, runHistory, selectedHarnessId]);
 

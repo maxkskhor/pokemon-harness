@@ -45,9 +45,10 @@ MAX_NOTES_CHARS = 1200
 MAX_WALLS_PER_MAP = 200
 
 SYSTEM_PROMPT = """\
-You are playing Pokemon Red on a Game Boy. Your mission: get the Boulder Badge from \
-Brock's gym in Pewter City. A GOAL line in each observation tells you the current \
-objective — follow it.
+You are playing a Pokemon game through an emulator. The current ROM may be Pokemon \
+Red/Blue or Pokemon Fire Red; trust the LOCATION, EXITS, CONNECTIONS, battle state, \
+and GOAL lines in each observation. Your mission is to get the Boulder Badge from \
+Brock's gym in Pewter City.
 
 How the world works:
 - The overworld is a tile grid; (x,y) has y increasing DOWNWARD (UP decreases y).
@@ -567,6 +568,17 @@ class GymAgent(PokemonAgent):
         status = self._status()
         before_map = status.get("map_id")
         bx, by = self._position(status)
+        if status.get("battle"):
+            return {
+                "error": "in battle — use run_away or battle_move before moving",
+                "requested": steps,
+                "walked": 0,
+                "moved": False,
+                "from": {"x": bx, "y": by, "map": before_map},
+                "to": {"x": bx, "y": by, "map": before_map, "map_name": status.get("map_name")},
+                "entered_new_map": False,
+                "in_battle": True,
+            }
         walked = 0
         for _ in range(steps):
             if not self._single_step(direction, before_map):
@@ -598,6 +610,16 @@ class GymAgent(PokemonAgent):
         """
         status = self._status()
         before_map = status.get("map_id")
+        if status.get("battle"):
+            x, y = self._position(status)
+            return {
+                "error": "in battle — use run_away or battle_move before moving",
+                "target": {"x": tx, "y": ty},
+                "arrived": False,
+                "position": {"x": x, "y": y, "map": before_map, "map_name": status.get("map_name")},
+                "entered_new_map": False,
+                "in_battle": True,
+            }
         # Warp tiles to route around: stepping onto a door/stair teleports you, so A* must
         # never path *through* one en route to an unreachable target (that's how the agent
         # accidentally bounced upstairs while heading for a Pallet/Route coordinate).
@@ -614,7 +636,8 @@ class GymAgent(PokemonAgent):
                 break
             if (x, y) == (tx, ty):
                 break
-            path = astar((x, y), (tx, ty), self._walls.get(before_map, set()), avoid=warp_tiles)
+            map_walls = self._walls.get(before_map, set()) if isinstance(before_map, int) else set()
+            path = astar((x, y), (tx, ty), map_walls, avoid=warp_tiles)
             if not path:
                 break  # genuinely boxed in by known walls — let the LLM decide
             # Walk the planned path until a step fails (new wall) or the map changes,
@@ -669,6 +692,11 @@ class GymAgent(PokemonAgent):
         # says nothing about walls.
         if self._input_locked():
             return
+        # Battle menus also ignore overworld movement. This can happen when a wild
+        # encounter interrupts goto mid-path; recording those failed directions
+        # poisons A* with fake walls around grass tiles.
+        if self._status().get("battle"):
+            return
         walls = self._walls.setdefault(map_id, set())
         if len(walls) < MAX_WALLS_PER_MAP:
             walls.add(f"{x},{y},{direction}")
@@ -721,22 +749,25 @@ class GymAgent(PokemonAgent):
         """
         if self._status().get("battle"):
             return {"error": "in battle — finish the fight before picking up a ball"}
+        is_frlg = self._status().get("map_id") == 1027
+        attempts = 40 if is_frlg else 16
+        wait_frames = 300 if is_frlg else 50
         start_count = self._party_count()
 
         acquired = False
-        for _ in range(16):
+        for _ in range(attempts):
             if self._party_count() > start_count:
                 acquired = True
                 break
             self.press("A")  # advance pickup dialogue / confirm the default YES
-            self.sequence([{"type": "wait", "frames": 50}])
+            self.sequence([{"type": "wait", "frames": wait_frames}])
 
         if acquired:
             # Advance the "<NAME> received X!" line; do NOT press any direction (that's
             # what corrupted the rival cutscene). Leave the rest to cutscene autoplay.
             for _ in range(2):
                 self.press("A")
-                self.sequence([{"type": "wait", "frames": 50}])
+                self.sequence([{"type": "wait", "frames": wait_frames}])
 
         status = self._status()
         party = status.get("party") or []
@@ -776,6 +807,11 @@ class GymAgent(PokemonAgent):
         self.press("A")
         self.sequence([{"type": "wait", "frames": 120}])
         after = self._status()
+        if not after.get("battle"):
+            for _ in range(3):
+                self.press("A")
+                self.sequence([{"type": "wait", "frames": 60}])
+            after = self._status()
         after_battle = after.get("battle") or {}
         result = {
             "used_slot": slot,
@@ -796,15 +832,23 @@ class GymAgent(PokemonAgent):
             return {"error": "not in battle"}
         if battle.get("kind") == "trainer":
             return {"error": "cannot run from a trainer battle — fight with battle_move"}
-        for button in ("B", "UP", "LEFT"):  # park on FIGHT
-            self.press(button)
-            self.sequence([{"type": "wait", "frames": 20}])
-        for button in ("DOWN", "RIGHT", "A"):  # RUN is bottom-right
-            self.press(button)
-            self.sequence([{"type": "wait", "frames": 30}])
-        self.sequence([{"type": "wait", "frames": 180}])
+        attempts = 0
+        while attempts < 3 and self._status().get("battle"):
+            attempts += 1
+            for button in ("B", "UP", "LEFT"):  # park on FIGHT
+                self.press(button)
+                self.sequence([{"type": "wait", "frames": 20}])
+            for button in ("DOWN", "RIGHT", "A"):  # RUN is bottom-right
+                self.press(button)
+                self.sequence([{"type": "wait", "frames": 30}])
+            self.sequence([{"type": "wait", "frames": 180}])
         after = self._status()
-        return {"escaped": not after.get("battle")}
+        if not after.get("battle"):
+            for _ in range(2):
+                self.press("A")
+                self.sequence([{"type": "wait", "frames": 45}])
+            after = self._status()
+        return {"attempts": attempts, "escaped": not after.get("battle")}
 
     def _tool_note(self, text: str) -> dict[str, Any]:
         with self._lock:
@@ -856,7 +900,8 @@ class GymAgent(PokemonAgent):
             if self._max_turns and self._turn_counter >= self._max_turns:
                 self.emit("lifecycle", {"status": "max_turns_reached", "turns": self._turn_counter})
                 return
-            if self._meta.current_milestone() is None:
+            milestone = self._meta.current_milestone()
+            if milestone is None:
                 self.emit("lifecycle", {"status": "all_milestones_complete"})
                 return
             # Stall abort: reset the clock whenever a new milestone lands; bail if it's
@@ -871,7 +916,7 @@ class GymAgent(PokemonAgent):
                     "turns_since_milestone": self._turn_counter - self._stall_base_turn,
                 })
                 return
-            goal_label = (self._meta.current_milestone().label if self._meta.current_milestone() else "explore")
+            goal_label = milestone.label
             with self.turn(goal=goal_label):
                 restore_speed: str | None = None
                 state = self.state()
@@ -937,14 +982,12 @@ class GymAgent(PokemonAgent):
         return True
 
     def _recover_lab_softlock(self) -> bool:
-        """Escape the Oak's-lab rival-cutscene softlock via the clean post-starter state.
+        """Escape Oak's-lab rival-cutscene softlocks via clean post-starter states.
 
-        After taking the starter, Pokemon Red runs a rival cutscene that can leave the
-        player frozen in the lab with NO standard lock flag set (so cutscene autoplay
-        can't see it) — the player is sealed in and no move/A helps. When we've been
-        frozen on one tile in Oak's lab (map 40) with a starter for several turns, jump
-        to the shared `post-starter` checkpoint (the documented skip past this known-hard
-        scripted section). Gated to the Gen-1 lab so it never fires elsewhere.
+        Starter pickup can leave the player frozen in Oak's lab with NO standard lock
+        flag set (so cutscene autoplay can't see it) — the player is sealed in and no
+        move/A helps. When we've been frozen on one tile in Oak's lab with a starter for
+        several turns, jump to that ROM's shared post-starter checkpoint.
         """
         state = self.state()
         status = state.get("status") or {}
@@ -955,22 +998,179 @@ class GymAgent(PokemonAgent):
         else:
             self._frozen_xy = xy
             self._frozen_turns = 0
+        map_id = status.get("map_id")
+        state_name_by_lab = {
+            40: "post-starter",  # Gen 1 Oak's Lab
+            1027: "post-starter-pokefirered",  # FRLG Oak's Lab
+        }
+        state_name = state_name_by_lab.get(map_id) if isinstance(map_id, int) else None
         has_starter = any((m.get("level") or 0) >= 1 for m in (status.get("party") or []))
-        if self._frozen_turns >= 6 and status.get("map_id") == 40 and has_starter:
+        if self._frozen_turns >= 6 and state_name and has_starter:
             try:
-                self.load_state("post-starter")
-                self._walls.pop(40, None)  # stale walls from the sealed state
+                self.load_state(state_name)
+                if isinstance(map_id, int):
+                    self._walls.pop(map_id, None)  # stale walls from the sealed state
                 self._frozen_turns = 0
                 self._frozen_xy = None
-                self.emit("lifecycle", {"status": "lab_softlock_skip", "via": "post-starter"})
+                self.emit("lifecycle", {"status": "lab_softlock_skip", "via": state_name})
                 return True
             except Exception as exc:
                 self.emit("warning", {"message": f"lab softlock skip failed: {exc}"})
         return False
 
+    def _advance_frlg_oak_scene(self) -> bool:
+        """Deterministically trigger FRLG Oak's route-block scene from Pallet.
+
+        At Pallet's north approach the game wants A/dialogue advancement before
+        transferring the player to Oak's lab. Weak models often keep trying movement
+        from the blocked tile, so handle this scripted transition without spending more
+        turns on navigation guesses.
+        """
+        state = self.state()
+        status = state.get("status") or {}
+        pokemon = state.get("pokemon") or {}
+        if status.get("map_id") != 768 or (pokemon.get("x"), pokemon.get("y")) != (12, 1):
+            return False
+        if any((m.get("level") or 0) >= 1 for m in (status.get("party") or [])):
+            return False
+
+        for presses in range(1, 41):
+            self.press("A")
+            self.sequence([{"type": "wait", "frames": 240}])
+            if self._status().get("map_id") == 1027:
+                try:
+                    self.load_state("post-starter-pokefirered")
+                    self.emit(
+                        "lifecycle",
+                        {
+                            "status": "frlg_oak_scene_autoplay",
+                            "presses": presses,
+                            "via": "post-starter-pokefirered",
+                        },
+                    )
+                except Exception as exc:
+                    self.emit("warning", {"message": f"FRLG post-starter skip failed: {exc}"})
+                return True
+        return False
+
+    def _step_off_frlg_pallet_door(self) -> bool:
+        """Move off FRLG's exterior player-house warp before planning across Pallet."""
+        state = self.state()
+        status = state.get("status") or {}
+        pokemon = state.get("pokemon") or {}
+        if status.get("map_id") != 768 or (pokemon.get("x"), pokemon.get("y")) != (6, 7):
+            return False
+        if any((m.get("level") or 0) >= 1 for m in (status.get("party") or [])):
+            return False
+        self.press("RIGHT")
+        self.sequence([{"type": "wait", "frames": MOVE_SETTLE_FRAMES}])
+        self.emit("lifecycle", {"status": "frlg_step_off_pallet_door"})
+        return True
+
+    def _finish_frlg_lab_departure(self) -> bool:
+        """Clear FRLG's rival scene and leave Oak's lab after the starter.
+
+        The post-starter checkpoint exists specifically to skip the fragile Oak/starter
+        sequence. Older/local copies can still land inside the lab before Blue's rival
+        battle has fully resolved: the player has Squirtle, but walking toward the exit
+        triggers dialogue that is not exposed as a battle/lock flag. Only run this while
+        the route-1 milestone is active, so later parcel delivery visits to Oak's lab stay
+        under model control.
+        """
+        current = self._meta.current_milestone()
+        if current is None or current.key != "route-1":
+            return False
+        status = self._status()
+        if status.get("map_id") != 1027:
+            return False
+        if not any((m.get("level") or 0) >= 1 for m in (status.get("party") or [])):
+            return False
+
+        before_map = status.get("map_id")
+        self._tool_goto(6, 12)
+        status = self._status()
+        if status.get("map_id") == before_map:
+            # If Blue intercepted us at (6,8), A-only clears the dialogue and starter
+            # fight. FRLG battle status is not reliably visible during this scripted
+            # sequence, so use the same deterministic input that live probing confirmed.
+            for _ in range(120):
+                self.press("A")
+                self.sequence([{"type": "wait", "frames": 240}])
+
+            for _ in range(6):
+                if self._status().get("map_id") != before_map:
+                    break
+                self._single_step("DOWN", before_map)
+
+        after = self._status()
+        if after.get("map_id") != before_map:
+            if isinstance(before_map, int):
+                self._walls.pop(before_map, None)
+            self.emit(
+                "lifecycle",
+                {
+                    "status": "frlg_lab_departure",
+                    "from": before_map,
+                    "to": after.get("map_id"),
+                },
+            )
+            return True
+        return False
+
+    def _enter_frlg_route1_from_pallet(self) -> bool:
+        """Handle FRLG Pallet's scripted north edge after the starter.
+
+        The north approach has a one-time Sign Lady coordinate script at (13,2). It can
+        leave the player with dialogue open but no exposed battle/lock flag, which makes
+        movement attempts look like walls. Route this fixed transition deterministically
+        while the route-1 milestone is active.
+        """
+        current = self._meta.current_milestone()
+        if current is None or current.key != "route-1":
+            return False
+        status = self._status()
+        if status.get("map_id") != 768:
+            return False
+        if not any((m.get("level") or 0) >= 1 for m in (status.get("party") or [])):
+            return False
+
+        before_map = status.get("map_id")
+        self._tool_goto(12, 1)
+        if self._status().get("map_id") == before_map:
+            for _ in range(20):
+                self.press("A")
+                self.sequence([{"type": "wait", "frames": 160}])
+            for _ in range(5):
+                if self._status().get("map_id") != before_map:
+                    break
+                self._single_step("UP", before_map)
+
+        after = self._status()
+        if after.get("map_id") != before_map:
+            if isinstance(before_map, int):
+                self._walls.pop(before_map, None)
+            self.emit(
+                "lifecycle",
+                {
+                    "status": "frlg_route1_entry",
+                    "from": before_map,
+                    "to": after.get("map_id"),
+                },
+            )
+            return True
+        return False
+
     def _play_one_turn(self) -> None:
         if self._recover_lab_softlock():
             return  # recovered from the lab softlock; resume normally next turn
+        if self._step_off_frlg_pallet_door():
+            return
+        if self._advance_frlg_oak_scene():
+            return
+        if self._finish_frlg_lab_departure():
+            return
+        if self._enter_frlg_route1_from_pallet():
+            return
         self._autoplay_cutscene()
         # Let any in-flight overworld transition (a map-change fade, the tail of a
         # step animation) finish before we screenshot. Otherwise the agent pauses

@@ -11,6 +11,10 @@ _LABELS = {
     "gSaveBlock2Ptr": 0x0300500C,
     "gPlayerPartyCount": 0x02024029,
     "gPlayerParty": 0x02024284,
+    "gBattleTypeFlags": 0x02022B4C,
+    "gBattlersCount": 0x02023BCC,
+    "gBattleMons": 0x02023BE4,
+    "gBattleOutcome": 0x02023E8A,
 }
 
 
@@ -94,6 +98,123 @@ def test_read_game_status_gen3() -> None:
     assert mon["hp"] == 19
     assert mon["max_hp"] == 33
     assert mon["status"] == "PAR"
+    assert status["battle"] is None
+
+
+def test_read_game_status_gen3_battle() -> None:
+    memory = _build_memory()
+
+    def write(address: int, values: list[int]) -> None:
+        for offset, value in enumerate(values):
+            memory[address + offset] = value
+
+    def write_u16(address: int, value: int) -> None:
+        write(address, [value & 0xFF, (value >> 8) & 0xFF])
+
+    def write_u32(address: int, value: int) -> None:
+        write(address, [(value >> (8 * i)) & 0xFF for i in range(4)])
+
+    write_u32(_LABELS["gBattleTypeFlags"], 1 << 2)  # in a non-trainer battle
+    memory[_LABELS["gBattlersCount"]] = 2
+    mine = _LABELS["gBattleMons"]
+    enemy = mine + 0x58
+    write_u16(mine, 7)          # Squirtle
+    write_u16(mine + 0x0C, 33)  # Tackle
+    write_u16(mine + 0x0E, 39)  # Tail Whip
+    memory[mine + 0x24] = 35
+    memory[mine + 0x25] = 30
+    write_u16(mine + 0x28, 18)
+    memory[mine + 0x2A] = 6
+    write_u16(mine + 0x2C, 21)
+
+    write_u16(enemy, 16)        # Pidgey
+    write_u16(enemy + 0x0C, 33)
+    memory[enemy + 0x24] = 35
+    write_u16(enemy + 0x28, 8)
+    memory[enemy + 0x2A] = 2
+    write_u16(enemy + 0x2C, 11)
+
+    status = read_game_status_gen3(SymbolMap(labels=dict(_LABELS)), lambda address: memory.get(address, 0))
+
+    battle = status["battle"]
+    assert battle is not None
+    assert battle["kind"] == "wild"
+    assert battle["enemy_species"] == "Pidgey"
+    assert battle["enemy_level"] == 2
+    assert battle["enemy_hp"] == 8
+    assert battle["enemy_max_hp"] == 11
+    assert battle["my"]["species"] == "Squirtle"
+    assert battle["my"]["hp"] == 18
+    assert battle["my"]["moves"] == [
+        {"slot": 1, "name": "Tackle", "pp": 35},
+        {"slot": 2, "name": "Tail Whip", "pp": 30},
+    ]
+
+
+def test_read_game_status_gen3_ignores_stale_defeated_battle_struct() -> None:
+    memory = _build_memory()
+
+    def write(address: int, values: list[int]) -> None:
+        for offset, value in enumerate(values):
+            memory[address + offset] = value
+
+    def write_u16(address: int, value: int) -> None:
+        write(address, [value & 0xFF, (value >> 8) & 0xFF])
+
+    def write_u32(address: int, value: int) -> None:
+        write(address, [(value >> (8 * i)) & 0xFF for i in range(4)])
+
+    # Looks like a leftover rival battle: enemy already defeated, but lead-party HP
+    # has been restored/synced to overworld save data and no longer matches gBattleMons.
+    write_u32(_LABELS["gBattleTypeFlags"], 1 << 3)
+    memory[_LABELS["gBattlersCount"]] = 2
+    mine = _LABELS["gBattleMons"]
+    enemy = mine + 0x58
+    write_u16(mine, 7)
+    memory[mine + 0x2A] = 6
+    write_u16(mine + 0x28, 9)
+    write_u16(mine + 0x2C, 21)
+    write_u16(enemy, 1)
+    memory[enemy + 0x2A] = 5
+    write_u16(enemy + 0x28, 0)
+    write_u16(enemy + 0x2C, 19)
+
+    status = read_game_status_gen3(SymbolMap(labels=dict(_LABELS)), lambda address: memory.get(address, 0))
+
+    assert status["party"][0]["hp"] == 19
+    assert status["battle"] is None
+
+
+def test_read_game_status_gen3_ignores_resolved_battle_outcome() -> None:
+    memory = _build_memory()
+
+    def write(address: int, values: list[int]) -> None:
+        for offset, value in enumerate(values):
+            memory[address + offset] = value
+
+    def write_u16(address: int, value: int) -> None:
+        write(address, [value & 0xFF, (value >> 8) & 0xFF])
+
+    def write_u32(address: int, value: int) -> None:
+        write(address, [(value >> (8 * i)) & 0xFF for i in range(4)])
+
+    write_u32(_LABELS["gBattleTypeFlags"], 1 << 2)
+    memory[_LABELS["gBattlersCount"]] = 2
+    memory[_LABELS["gBattleOutcome"]] = 1  # B_OUTCOME_WON
+    mine = _LABELS["gBattleMons"]
+    enemy = mine + 0x58
+    write_u16(mine, 7)
+    memory[mine + 0x2A] = 6
+    write_u16(mine + 0x28, 12)
+    write_u16(mine + 0x2C, 21)
+    write_u16(enemy, 16)
+    memory[enemy + 0x2A] = 3
+    write_u16(enemy + 0x28, 0)
+    write_u16(enemy + 0x2C, 16)
+
+    status = read_game_status_gen3(SymbolMap(labels=dict(_LABELS)), lambda address: memory.get(address, 0))
+
+    assert status["battle"] is None
 
 
 def test_read_game_status_gen3_unloaded_saveblocks() -> None:

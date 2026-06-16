@@ -2,21 +2,21 @@
 
 **Watch an LLM play Pokemon — and see exactly what it saw, what it decided, and why, on every single turn.**
 
-This is a local agent harness for Pokemon Red/Blue and Pokemon Fire Red. Point any LLM at the game and the UI shows you the live screen on the left and a turn-by-turn trace of the agent's mind on the right: the observation it was given, the reasoning it produced, the button it pressed, the raw prompt and token usage, and the screenshot at that moment. Every run is checkpointed and replayable, so you can pause, rewind, branch, and resume from any point.
+This is a local, ROM-aware agent harness for Pokemon Red/Blue and Pokemon Fire Red. Point any LLM-backed agent at the game and the UI shows you the live screen on the left and a turn-by-turn trace of the agent's mind on the right: the observation it was given, the reasoning it produced, the tool it called, the raw prompt and token usage, and the screenshot at that moment. Every run is checkpointed and replayable, so you can pause, rewind, branch, and resume from any point.
 
 It's built around two ideas that most "LLM plays a game" demos skip: **observability** (you can always answer *why did it do that?*) and **debuggability** (a run is a first-class artifact you can inspect and replay, not a stream you watch once).
-![Pokemon LLM Harness UI showing live gameplay beside turn-by-turn trace cards](docs/assets/demo-page-2.png)
+![Pokemon LLM Harness Watch view showing Fire Red gameplay beside the agent conversation](docs/assets/demo-page.png)
 
 ## Why it's interesting
 
 Getting an LLM to *press buttons* in an emulator is easy. Getting one to make real, observable, recoverable progress is a harness-engineering problem, and that's what this project is really about:
 
-- **A meta-harness that supervises the run.** `harness/meta.py` defines the journey (bedroom → Pallet Town → Oak's lab → starter → Route 1 → … → Boulder Badge) as an ordered list of milestones, each checked against game RAM every turn. It auto-checkpoints at every milestone, rolls back on a party wipe or a no-progress stall, escalates to a stronger model when stuck, and enforces a hard dollar budget.
-- **RAM-derived observations, not pixels-only.** The agent is told its exact location, party (with moves and PP), live battle HP for both sides, and — crucially — the **exits and map connections mined from the game's own disassembly**. Feeding the agent the real door coordinates cut "leave the bedroom" from 11 turns to 4.
+- **A meta-harness that supervises the run.** `harness/meta.py` defines the journey (bedroom → Pallet Town → Oak's lab → starter → Route 1 → … → Boulder Badge) as an ordered list of milestones, each checked against game RAM every turn. It auto-checkpoints at every milestone, rolls back on a party wipe or a no-progress stall, can escalate or swap models by policy, and enforces a hard dollar budget.
+- **RAM-derived observations, not pixels-only.** The agent is told its exact location, party (with moves and PP), live battle HP for both sides, and — crucially — the **exits and map connections mined from each game's own data**. The point is not to hand-script a demo path; it is to expose grounded world state that any agent or model can use.
 - **A clean split between game state and LLM context.** Game state is the authoritative world record; LLM context is a minimal, cache-stable *projection* of it. History is built from plain-language turn summaries (`"move RIGHT×3 → (x=5,y=6), press A"`), and screenshots never leak into history — so the prefix cache stays warm and tokens stay flat. (See `LESSONS.md`.)
-- **Deterministic macros for the parts LLMs fumble.** `battle_move(slot)` and `goto(x,y)` drive the game's menu cursor and pathing from RAM reads, so the model spends its budget on decisions, not on fighting fiddly menus.
+- **Deterministic tools for game mechanics.** `battle_move(slot)`, `run_away()`, `take_starter()`, and `goto(x,y)` turn low-level emulator input into inspectable, replayable actions, so the model spends its budget on decisions rather than menu timing.
 - **Checkpoint + rollback that includes the agent's brain.** A checkpoint saves emulator state *and* a sidecar of the agent's own history/notes, so a rewind restores both the world and what the agent "knew" — runs stay consistent across branches.
-- **Two emulators, one API.** Pokemon Red/Blue run on PyBoy; Pokemon Fire Red runs on locally built mGBA Python bindings. Dispatch is by ROM suffix; the harness API is identical either way.
+- **Two emulators, one API.** Pokemon Red/Blue run on PyBoy; Pokemon Fire Red runs on locally built mGBA Python bindings. Dispatch is by ROM suffix; the harness API is identical either way, and Fire Red is the default ROM when available.
 
 If you're learning how to build LLM agent harnesses, this is a compact, real-world example of the hard parts: observability, state management, cost control, and recovery.
 
@@ -32,6 +32,8 @@ If you're learning how to build LLM agent harnesses, this is a compact, real-wor
 - Human-in-the-loop steering: type an instruction during a live run and the agent folds it into its next turn.
 - Benchmark mode and one-file HTML trace export for comparing models and sharing runs.
 - Provider-neutral harness API: write an agent in Python, or call the HTTP API from any language.
+
+![Pokemon LLM Harness Runs view showing checkpoints, replay controls, and conversation trace](docs/assets/demo-page-2.png)
 
 ## Quick start
 
@@ -63,7 +65,7 @@ agents:
 
 `gym_agent` is the strongest bundled harness — its mission is to reach Pewter City and beat Brock. It combines rich RAM observations, deterministic battle/movement macros (including a `take_starter` pickup that drives Oak's-lab prompts from the menu cursor), a structured world map plus learned per-map walls and a persistent notes scratchpad, and the meta-harness supervisor described above.
 
-Model defaults (override with `POKEMON_AGENT_MODEL` / `POKEMON_ESCALATION_MODEL`):
+Bundled baseline model policy (override with `POKEMON_AGENT_MODEL` / `POKEMON_ESCALATION_MODEL`):
 
 | Role | Model | $/M in / out |
 |---|---|---|
@@ -71,7 +73,7 @@ Model defaults (override with `POKEMON_AGENT_MODEL` / `POKEMON_ESCALATION_MODEL`
 | Escalation (when stuck) | `openai/gpt-5-mini` | 0.25 / 2.00 |
 | Cheap alternates | `qwen/qwen3.5-flash-02-23`, `google/gemini-2.5-flash-lite` | ~0.07–0.10 in |
 
-**What it does reliably today:** leaves the bedroom (turn 1–4), exits to Pallet Town, and obtains its starter from Oak's lab (~turn 19, ~$0.005 with gpt-5-nano), with the meta-harness firing milestone checkpoints and recovering from navigation loops via rollback. Clearing all the way to Brock unattended in one run is not yet reliable at this model tier — the harness is built for steady, observable, recoverable progress and easy model swaps, not a guaranteed clear. That gap is the fun part.
+**What it does reliably today:** on Fire Red, the bundled Gym Agent leaves the bedroom, exits to Pallet Town, clears Oak's lab, obtains its starter, and reaches Route 1 with milestone checkpoints and traceable recovery. The current blocker is not a one-off prompt tweak for a particular baseline model; it is generic route planning through richer map/collision knowledge, especially ledges and wild-battle interruptions between Route 1 and Viridian City.
 
 ## Build your own agent
 
@@ -133,7 +135,7 @@ brew install cmake libpng pkg-config arm-none-eabi-binutils   # macOS build deps
 scripts/setup_firered.sh
 ```
 
-Afterwards "POKEMON FIRE" appears in the UI's game dropdown, with a `bedroom-pokefirered` start state so agents skip the long intro.
+Afterwards "POKEMON FIRE" appears in the UI's game dropdown and becomes the default ROM, with a `bedroom-pokefirered` start state so agents skip the long intro.
 
 ## Benchmark and share runs
 
@@ -147,6 +149,9 @@ uv run python scripts/bench.py score runs/<run-a> runs/<run-b> -o bench-results.
 uv run python scripts/bench.py run --models openai/gpt-5-nano,google/gemini-2.5-flash-lite \
     --max-turns 120 --budget 0.50
 ```
+
+The latest Fire Red leaderboard and post-analysis are in `bench-results-fire-red.md` and
+`docs/bench/fire-red-post-analysis.md`.
 
 Export any run as a single self-contained HTML file — game frames, per-turn reasoning, tool calls, token/cost usage, and milestone/rollback banners — to drop into a blog post or share:
 

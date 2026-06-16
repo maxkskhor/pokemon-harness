@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from harness.llm import LLMCallError, LLMClient, RetryPolicy
+from harness.llm import LLMCallError, LLMClient, LLMProviderConfig, OpenAIChatProvider, RetryPolicy
 
 
 class FakeProvider:
@@ -87,3 +87,28 @@ def test_llm_client_does_not_retry_non_retryable_error() -> None:
     assert raised.value.attempts == 1
     assert raised.value.retryable is False
     assert len(provider.calls) == 1
+
+
+def test_openai_provider_uses_env_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr("harness.llm.openai.OpenAI", FakeOpenAI)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setenv("POKEMON_LLM_TIMEOUT_S", "12.5")
+
+    OpenAIChatProvider.from_env(
+        LLMProviderConfig(
+            name="openrouter",
+            base_url="https://example.test/api",
+            api_key_env="OPENROUTER_API_KEY",
+            default_model="test-model",
+        )
+    )
+
+    assert captured["api_key"] == "test-key"
+    assert captured["base_url"] == "https://example.test/api"
+    assert captured["timeout"] == 12.5

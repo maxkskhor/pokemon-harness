@@ -141,7 +141,7 @@ def _ensure_mgba_importable() -> None:
     import sys
 
     try:
-        import mgba  # noqa: F401
+        import mgba  # type: ignore[reportMissingImports]  # noqa: F401
         return
     except ImportError:
         pass
@@ -161,9 +161,9 @@ class MGBAEmulator:
 
     def __init__(self, rom_path: Path, sym_path: Path | None = None):
         _ensure_mgba_importable()
-        import mgba.core
-        import mgba.image
-        import mgba.log
+        import mgba.core  # type: ignore[reportMissingImports]
+        import mgba.image  # type: ignore[reportMissingImports]
+        import mgba.log  # type: ignore[reportMissingImports]
 
         mgba.log.silence()
         core = mgba.core.load_path(str(rom_path))
